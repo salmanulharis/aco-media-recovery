@@ -533,7 +533,8 @@ jQuery(document).ready(function ($) {
         };
         
         var className = classMap[type] || 'log-muted';
-        consoleBox.append('<span class="' + className + '">' + escapeHtml(message) + '</span>');
+        var finalMsg = (type === 'success') ? message : escapeHtml(message);
+        consoleBox.append('<span class="' + className + '">' + finalMsg + '</span>');
         
         // Auto scroll to bottom
         consoleBox.scrollTop(consoleBox[0].scrollHeight);

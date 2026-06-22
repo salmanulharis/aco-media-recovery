@@ -279,7 +279,13 @@ class ACO_Media_Recovery_Ajax {
 
             if ( $original_recovered ) {
                 $status = 'success';
-                $msg = sprintf( __( 'Recovered file: %s (%s)', 'aco-media-recovery' ), $relative_path, $details ? $details : __( 'Downloaded', 'aco-media-recovery' ) );
+                $file_url = $uploads['baseurl'] . '/' . $relative_path;
+                $msg = sprintf( 
+                    __( 'Recovered file: <a href="%s" target="_blank" style="color: #0d6efd; text-decoration: underline;">%s</a> (%s)', 'aco-media-recovery' ), 
+                    esc_url( $file_url ),
+                    esc_html( $relative_path ),
+                    $details ? $details : __( 'Downloaded', 'aco-media-recovery' ) 
+                );
                 
                 // Remove the 'deleted' status from the local server meta so it registers as locally available
                 if ( ! $dry_run ) {
@@ -552,7 +558,13 @@ class ACO_Media_Recovery_Ajax {
             }
 
             if ( $download_success ) {
-                $msg = sprintf( __( 'Recovered file: %s%s', 'aco-media-recovery' ), $relative_path, $msg_suffix );
+                $file_url = $uploads['baseurl'] . '/' . $relative_path;
+                $msg = sprintf( 
+                    __( 'Recovered file: <a href="%s" target="_blank" style="color: #0d6efd; text-decoration: underline;">%s</a>%s', 'aco-media-recovery' ), 
+                    esc_url( $file_url ),
+                    esc_html( $relative_path ),
+                    $msg_suffix 
+                );
                 $thumb_logs = [];
 
                 if ( $auto_thumbs ) {
