@@ -1,0 +1,44 @@
+name: Create Release Zip
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Prepare release folder
+        run: |
+          mkdir aco-media-recovery
+          rsync -av ./ aco-media-recovery/ \
+            --exclude='aco-media-recovery' \
+            --exclude='.git' \
+            --exclude='.gitignore' \
+            --exclude='.gitlab-ci.yml' \
+            --exclude='.github' \
+            --exclude='aco-media-recovery_*.zip'
+
+      - name: Create zip file
+        run: |
+          TAG_NAME=${GITHUB_REF##*/}
+          ZIP_NAME="aco-media-recovery_${TAG_NAME}.zip"
+          zip -r "$ZIP_NAME" aco-media-recovery
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: ${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

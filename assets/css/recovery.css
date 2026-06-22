@@ -1,0 +1,718 @@
+/**
+ * Media Recovery Tool - WordPress Minimal Light Theme
+ * Prefixed with .acomr- to avoid any layout conflicts with WordPress Core or other plugins.
+ */
+
+.acomr-recovery-container {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    color: #3c434a !important;
+    padding-right: 20px;
+    margin-top: 15px;
+    box-sizing: border-box;
+}
+
+.acomr-recovery-container * {
+    box-sizing: border-box;
+}
+
+/* Header */
+.acomr-header {
+    margin-bottom: 20px;
+}
+
+.acomr-recovery-container h1 {
+    font-size: 23px;
+    font-weight: 400;
+    margin: 0 0 5px 0;
+    color: #1d2327;
+}
+
+.acomr-recovery-container p.subtitle {
+    color: #646970;
+    font-size: 13px;
+    margin: 0;
+}
+
+/* Stats Row */
+.acomr-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 15px;
+    margin-bottom: 25px;
+}
+
+.acomr-stat-card {
+    background: #ffffff;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.acomr-stat-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.acomr-stat-card.acomr-stat-critical {
+    border-left: 4px solid #d94f4f;
+}
+
+.acomr-stat-value {
+    font-size: 28px;
+    font-weight: 600;
+    color: #1d2327;
+    line-height: 1.1;
+    margin-bottom: 4px;
+}
+
+.acomr-stat-label {
+    font-size: 11px;
+    color: #646970;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Core Card Containers (Prefixed to avoid WP .card conflict!) */
+.acomr-recovery-container .acomr-card {
+    background: #ffffff;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    margin-bottom: 20px;
+    width: 100% !important; /* Force full width */
+    max-width: 100% !important; /* Override any max-width restrictions */
+    display: block !important;
+}
+
+.acomr-recovery-container .acomr-card h2 {
+    margin: 0 0 15px 0;
+    color: #1d2327;
+    font-size: 14px;
+    font-weight: 600;
+    border-bottom: 1px solid #f0f0f1;
+    padding-bottom: 10px;
+}
+
+/* Tab Container Customizations */
+.acomr-panel-tabs-container {
+    padding-top: 10px !important;
+}
+
+.acomr-tab-headers {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #dcdcde;
+}
+
+.acomr-tab-btn {
+    background: none;
+    border: none;
+    color: #646970;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    position: relative;
+    transition: color 0.15s ease;
+    outline: none;
+}
+
+.acomr-tab-btn:hover {
+    color: #2271b1;
+}
+
+.acomr-tab-btn.active {
+    color: #2271b1;
+    font-weight: 600;
+}
+
+.acomr-tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #2271b1;
+}
+
+.acomr-tab-content {
+    display: none;
+    width: 100%;
+}
+
+.acomr-tab-content.acomr-tab-active {
+    display: block;
+}
+
+/* Settings Column Layout */
+.acomr-settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .acomr-settings-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+}
+
+.acomr-settings-col {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Form Styles */
+.acomr-form-group {
+    margin-bottom: 18px;
+}
+
+.acomr-form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #1d2327;
+    font-size: 13px;
+}
+
+.acomr-form-group input[type="url"], 
+.acomr-form-group input[type="text"] {
+    width: 100%;
+    background: #ffffff;
+    border: 1px solid #8c8f94;
+    border-radius: 4px;
+    color: #2c3338;
+    padding: 8px 12px;
+    outline: none;
+    font-family: inherit;
+    font-size: 14px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) inset;
+    transition: border-color 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+}
+
+.acomr-form-group input[type="url"]:focus, 
+.acomr-form-group input[type="text"]:focus {
+    border-color: #2271b1;
+    box-shadow: 0 0 0 1px #2271b1;
+}
+
+.acomr-description {
+    color: #646970;
+    font-size: 12px;
+    margin-top: 5px;
+    line-height: 1.4;
+    font-style: italic;
+}
+
+/* Radio Group */
+.acomr-radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.acomr-radio-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    color: #2c3338;
+    cursor: pointer;
+    background: #f6f7f7;
+    padding: 10px 12px;
+    border-radius: 4px;
+    border: 1px solid #dcdcde;
+    transition: background 0.1s ease;
+}
+
+.acomr-radio-label:hover {
+    background: #f0f0f1;
+}
+
+.acomr-radio-label input[type="radio"] {
+    margin-top: 3px;
+    accent-color: #2271b1;
+}
+
+.acomr-radio-label span {
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.acomr-radio-label small {
+    color: #646970;
+}
+
+/* Checkbox Group */
+.acomr-checkbox-group {
+    background: #f6f7f7;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid #dcdcde;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.acomr-checkbox-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: #2c3338;
+    cursor: pointer;
+}
+
+.acomr-checkbox-label input[type="checkbox"] {
+    margin-top: 3px;
+    accent-color: #2271b1;
+}
+
+.acomr-checkbox-label span {
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.acomr-checkbox-label small {
+    color: #646970;
+}
+
+/* Buttons */
+.acomr-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    border: 1px solid transparent;
+    font-size: 13px;
+    line-height: 2.15;
+    min-height: 30px;
+    transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.acomr-btn-primary {
+    background: #2271b1;
+    border-color: #2271b1;
+    color: #ffffff;
+}
+
+.acomr-btn-primary:hover {
+    background: #135e96;
+    border-color: #135e96;
+}
+
+.acomr-btn-danger {
+    background: #b32d2e;
+    border-color: #b32d2e;
+    color: #ffffff;
+}
+
+.acomr-btn-danger:hover {
+    background: #902425;
+    border-color: #902425;
+}
+
+.acomr-btn-secondary {
+    background: #f6f7f7;
+    border-color: #2271b1;
+    color: #2271b1;
+}
+
+.acomr-btn-secondary:hover {
+    background: #f0f0f1;
+}
+
+.acomr-btn-icon {
+    font-size: 14px;
+    padding: 4px 10px;
+}
+
+.acomr-btn-small {
+    padding: 4px 10px;
+    font-size: 11px;
+    line-height: 2;
+    min-height: 24px;
+}
+
+.acomr-btn:disabled {
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+}
+
+/* Table Actions Toolbar */
+.acomr-table-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .acomr-table-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+.acomr-actions-left {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-grow: 1;
+}
+
+.acomr-actions-left input[type="text"] {
+    max-width: 280px;
+}
+
+.acomr-actions-left select {
+    background: #ffffff;
+    border: 1px solid #8c8f94;
+    color: #2c3338;
+    border-radius: 4px;
+    padding: 0 24px 0 8px;
+    height: 32px;
+    font-size: 14px;
+    outline: none;
+    cursor: pointer;
+}
+
+.acomr-actions-right {
+    display: flex;
+    gap: 8px;
+}
+
+/* Media Table (Fully Expanded) */
+.acomr-table-container {
+    background: #ffffff;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin-bottom: 15px;
+    max-height: 480px;
+    width: 100%;
+}
+
+.acomr-media-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+}
+
+.acomr-media-table th, 
+.acomr-media-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f0f0f1;
+    vertical-align: middle;
+}
+
+.acomr-media-table th {
+    background: #f6f7f7;
+    font-weight: 600;
+    color: #1d2327;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid #dcdcde;
+}
+
+.acomr-media-table tbody tr:nth-child(odd) {
+    background: #fcfcfc;
+}
+
+.acomr-media-table tbody tr:hover {
+    background: #f0f6fa;
+}
+
+.acomr-media-table input[type="checkbox"] {
+    accent-color: #2271b1;
+    cursor: pointer;
+    margin: 0;
+}
+
+.acomr-table-placeholder {
+    text-align: center;
+    color: #646970;
+    padding: 30px 0 !important;
+    font-style: italic;
+}
+
+/* Status Badges */
+.acomr-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.acomr-badge-success {
+    background: #e7f6ed;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
+
+.acomr-badge-warning {
+    background: #fff9e6;
+    color: #b78103;
+    border: 1px solid #ffe0b2;
+}
+
+.acomr-badge-danger {
+    background: #fbe9e7;
+    color: #c62828;
+    border: 1px solid #ffccbc;
+}
+
+.acomr-badge-info {
+    background: #e8f0fe;
+    color: #1a73e8;
+    border: 1px solid #d2e3fc;
+}
+
+.acomr-badge-muted {
+    background: #f0f0f1;
+    color: #50575e;
+    border: 1px solid #dcdcde;
+}
+
+.acomr-badge-count {
+    background: #f3e5f5;
+    color: #7b1fa2;
+    border: 1px solid #e1bee7;
+}
+
+/* Pagination */
+.acomr-table-pagination {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 5px;
+    margin-top: 15px;
+    width: 100%;
+}
+
+.acomr-page-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    background: #ffffff;
+    border: 1px solid #8c8f94;
+    color: #2271b1;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.1s ease;
+}
+
+.acomr-page-link:hover:not(:disabled) {
+    background: #f0f0f1;
+    color: #135e96;
+    border-color: #2271b1;
+}
+
+.acomr-page-link.active {
+    background: #2271b1;
+    color: #ffffff;
+    border-color: #2271b1;
+    font-weight: 600;
+}
+
+.acomr-page-link:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    border-color: #dcdcde;
+    color: #8c8f94;
+}
+
+.acomr-pagination-info {
+    font-size: 12px;
+    color: #646970;
+    margin-right: 8px;
+}
+
+/* Manual JSON Textarea */
+textarea#json_input {
+    width: 100%;
+    height: 200px;
+    background: #ffffff;
+    border: 1px solid #8c8f94;
+    border-radius: 4px;
+    color: #2c3338;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    padding: 10px;
+    outline: none;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.07);
+}
+
+textarea#json_input:focus {
+    border-color: #2271b1;
+}
+
+/* Logging Console Container */
+.acomr-panel-console {
+    margin-top: 20px;
+    border-color: #2271b1 !important;
+}
+
+.acomr-console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    width: 100%;
+}
+
+.acomr-console-header h2 {
+    margin: 0 !important;
+    border: none !important;
+    padding-bottom: 0 !important;
+}
+
+/* Progress bar styling */
+.acomr-progress-bar-container {
+    width: 100%;
+    height: 16px;
+    background: #f0f0f1;
+    border-radius: 3px;
+    border: 1px solid #dcdcde;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.acomr-progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: #2271b1;
+    transition: width 0.25s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.acomr-progress-status {
+    font-size: 12px;
+    color: #646970;
+    margin-bottom: 10px;
+}
+
+/* Dark theme Console output box (for code logging) */
+.acomr-console-box {
+    background: #1d2327;
+    border: 1px solid #1d2327;
+    border-radius: 4px;
+    padding: 14px;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    height: 240px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    color: #34d399;
+}
+
+/* Log Item color rules inside console */
+.log-info { color: #60a5fa; display: block; }
+.log-warning { color: #f59e0b; display: block; }
+.log-error { color: #f87171; display: block; font-weight: 600; }
+.log-success { color: #34d399; display: block; }
+.log-muted { color: #a3a3a3; display: block; }
+.log-title { color: #c084fc; display: block; font-weight: 600; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; }
+.log-sub-item { color: #86efac; padding-left: 15px; display: block; }
+
+/* Credentials Panel Styles */
+.acomr-credentials-section {
+    margin-top: 25px;
+    border-top: 1px solid #dcdcde;
+    padding-top: 20px;
+    width: 100%;
+}
+
+.acomr-credentials-section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d2327;
+    margin: 0 0 15px 0;
+}
+
+.acomr-cred-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 15px;
+    width: 100%;
+}
+
+.acomr-cred-item {
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 12px 15px;
+}
+
+.acomr-cred-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #646970;
+    margin-bottom: 4px;
+}
+
+.acomr-cred-value {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #2c3338;
+}
+
+.acomr-cred-value code {
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    background: none;
+    padding: 0;
+}
+
+.acomr-reveal-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    color: #2271b1;
+    line-height: 1;
+    outline: none;
+    transition: color 0.1s ease;
+}
+
+.acomr-reveal-btn:hover {
+    color: #135e96;
+}
+
+.acomr-masked-value {
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+}
+
