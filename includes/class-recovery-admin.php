@@ -81,7 +81,7 @@ class ACO_Media_Recovery_Admin {
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( __( 'Unauthorized access.', 'aco-media-recovery' ) );
         }
-        
+        nocache_headers();
         // Render template
         include ACO_MEDIA_RECOVERY_PATH . 'templates/recovery-page.php';
     }

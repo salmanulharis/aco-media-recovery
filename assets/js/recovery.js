@@ -10,6 +10,11 @@ jQuery(document).ready(function ($) {
         items: [] // List of items on current page
     };
 
+    // Ensure the AJAX URL scheme matches the current page protocol to prevent SSL/Redirect POST drops
+    if (window.location.protocol === 'https:' && ACO_Media_Recovery_Settings.ajax_url.indexOf('http:') === 0) {
+        ACO_Media_Recovery_Settings.ajax_url = ACO_Media_Recovery_Settings.ajax_url.replace('http:', 'https:');
+    }
+
     // Initialize UI
     init();
 
@@ -146,14 +151,30 @@ jQuery(document).ready(function ($) {
                     replace_existing: replaceExisting
                 },
                 success: function (res) {
-                    if (res.success) {
+                    if (res && res.success && res.data) {
                         alert(res.data.message);
                     } else {
-                        alert('Error: ' + res.data.message);
+                        var errMsg = 'Unknown error occurred.';
+                        if (res === -1 || res === '-1') {
+                            errMsg = 'Security check failed / Nonce expired. Please refresh the page and try again.';
+                        } else if (res === 0 || res === '0') {
+                            errMsg = 'AJAX action not registered or failed.';
+                        } else if (res && res.data && res.data.message) {
+                            errMsg = res.data.message;
+                        }
+                        alert('Error: ' + errMsg);
                     }
                 },
-                error: function () {
-                    alert('Error saving settings.');
+                error: function (xhr, status, error) {
+                    var detail = '';
+                    if (xhr.status === 403) {
+                        detail = ' (403 Forbidden - Possibly blocked by Web Application Firewall or security plugin)';
+                    } else if (xhr.status === 404) {
+                        detail = ' (404 Not Found)';
+                    } else if (xhr.status) {
+                        detail = ' (HTTP ' + xhr.status + ')';
+                    }
+                    alert('Error saving settings: Request failed' + detail + '.');
                 },
                 complete: function () {
                     btn.prop('disabled', false).text('Save Settings');
@@ -207,16 +228,30 @@ jQuery(document).ready(function ($) {
                 filter: state.filter
             },
             success: function (res) {
-                if (res.success) {
+                if (res && res.success && res.data) {
                     renderTable(res.data.items);
                     renderPagination(res.data.pages, res.data.current, res.data.total_count);
                     updateStats(res.data.stats);
                 } else {
-                    tbody.html('<tr><td colspan="6" class="acomr-table-placeholder log-error">Error: ' + res.data.message + '</td></tr>');
+                    var errMsg = 'Unknown error occurred.';
+                    if (res === -1 || res === '-1') {
+                        errMsg = 'Security check failed / Nonce expired. Please refresh the page.';
+                    } else if (res === 0 || res === '0') {
+                        errMsg = 'AJAX action not registered.';
+                    } else if (res && res.data && res.data.message) {
+                        errMsg = res.data.message;
+                    }
+                    tbody.html('<tr><td colspan="6" class="acomr-table-placeholder log-error">Error: ' + errMsg + '</td></tr>');
                 }
             },
-            error: function () {
-                tbody.html('<tr><td colspan="6" class="acomr-table-placeholder log-error">Error making AJAX request.</td></tr>');
+            error: function (xhr, status, error) {
+                var detail = '';
+                if (xhr.status === 403) {
+                    detail = ' (403 Forbidden - Possibly blocked by Web Application Firewall)';
+                } else if (xhr.status) {
+                    detail = ' (HTTP ' + xhr.status + ')';
+                }
+                tbody.html('<tr><td colspan="6" class="acomr-table-placeholder log-error">Error making AJAX request' + detail + '.</td></tr>');
             }
         });
     }
@@ -339,7 +374,7 @@ jQuery(document).ready(function ($) {
                 filter: state.filter
             },
             success: function (res) {
-                if (res.success && res.data.items) {
+                if (res && res.success && res.data && res.data.items) {
                     var ids = res.data.items.map(function(item) { return item.id; });
                     if (ids.length === 0) {
                         logToConsole('[ERROR] No attachments found matching current criteria.', 'error');
@@ -351,12 +386,26 @@ jQuery(document).ready(function ($) {
                         });
                     }
                 } else {
-                    logToConsole('[ERROR] Failed to query matching IDs: ' + res.data.message, 'error');
+                    var errMsg = 'Unknown error occurred.';
+                    if (res === -1 || res === '-1') {
+                        errMsg = 'Security check failed / Nonce expired. Please refresh the page.';
+                    } else if (res === 0 || res === '0') {
+                        errMsg = 'AJAX action not registered.';
+                    } else if (res && res.data && res.data.message) {
+                        errMsg = res.data.message;
+                    }
+                    logToConsole('[ERROR] Failed to query matching IDs: ' + errMsg, 'error');
                     $('#btn-recover-all').prop('disabled', false);
                 }
             },
-            error: function () {
-                logToConsole('[ERROR] Request error while querying matching IDs.', 'error');
+            error: function (xhr, status, error) {
+                var detail = '';
+                if (xhr.status === 403) {
+                    detail = ' (403 Forbidden - Possibly blocked by Web Application Firewall)';
+                } else if (xhr.status) {
+                    detail = ' (HTTP ' + xhr.status + ')';
+                }
+                logToConsole('[ERROR] Request error while querying matching IDs' + detail + '.', 'error');
                 $('#btn-recover-all').prop('disabled', false);
             }
         });
@@ -415,7 +464,7 @@ jQuery(document).ready(function ($) {
                     replace_existing: replaceExisting
                 },
                 success: function (res) {
-                    if (res.success && res.data.logs) {
+                    if (res && res.success && res.data && res.data.logs) {
                         res.data.logs.forEach(function (log) {
                             var statusType = log.status === 'success' ? 'success' : 'error';
                             logToConsole(log.message, statusType);
@@ -431,15 +480,29 @@ jQuery(document).ready(function ($) {
                         processed += chunk.length;
                         updateProgressBar(processed, total);
                     } else {
-                        logToConsole('[ERROR] Failed to process batch chunk: ' + (res.data ? res.data.message : 'Unknown error'), 'error');
+                        var errMsg = 'Unknown error occurred.';
+                        if (res === -1 || res === '-1') {
+                            errMsg = 'Security check failed / Nonce expired. Please refresh the page.';
+                        } else if (res === 0 || res === '0') {
+                            errMsg = 'AJAX action not registered.';
+                        } else if (res && res.data && res.data.message) {
+                            errMsg = res.data.message;
+                        }
+                        logToConsole('[ERROR] Failed to process batch chunk: ' + errMsg, 'error');
                         processed += chunk.length;
                         updateProgressBar(processed, total);
                     }
                     // Continue to next chunk
                     processNextChunk();
                 },
-                error: function () {
-                    logToConsole('[ERROR] HTTP Request failed during chunk processing.', 'error');
+                error: function (xhr, status, error) {
+                    var detail = '';
+                    if (xhr.status === 403) {
+                        detail = ' (403 Forbidden - Possibly blocked by Web Application Firewall)';
+                    } else if (xhr.status) {
+                        detail = ' (HTTP ' + xhr.status + ')';
+                    }
+                    logToConsole('[ERROR] HTTP Request failed during chunk processing' + detail + '.', 'error');
                     processed += chunk.length;
                     updateProgressBar(processed, total);
                     processNextChunk();
@@ -483,7 +546,7 @@ jQuery(document).ready(function ($) {
                 replace_existing: replaceExisting
             },
             success: function (res) {
-                if (res.success && res.data.logs) {
+                if (res && res.success && res.data && res.data.logs) {
                     res.data.logs.forEach(function (log) {
                         var statusType = log.status === 'success' ? 'success' : 'error';
                         logToConsole(log.message, statusType);
@@ -497,13 +560,27 @@ jQuery(document).ready(function ($) {
                     });
                     logToConsole('[COMPLETE] JSON custom mappings import finished.', 'success');
                 } else {
-                    logToConsole('[ERROR] JSON Import Failed: ' + (res.data ? res.data.message : 'Unknown error'), 'error');
+                    var errMsg = 'Unknown error occurred.';
+                    if (res === -1 || res === '-1') {
+                        errMsg = 'Security check failed / Nonce expired. Please refresh the page.';
+                    } else if (res === 0 || res === '0') {
+                        errMsg = 'AJAX action not registered.';
+                    } else if (res && res.data && res.data.message) {
+                        errMsg = res.data.message;
+                    }
+                    logToConsole('[ERROR] JSON Import Failed: ' + errMsg, 'error');
                 }
                 $('#btn-import-json').prop('disabled', false);
                 loadMediaList();
             },
-            error: function () {
-                logToConsole('[ERROR] Request error during JSON import.', 'error');
+            error: function (xhr, status, error) {
+                var detail = '';
+                if (xhr.status === 403) {
+                    detail = ' (403 Forbidden - Possibly blocked by Web Application Firewall)';
+                } else if (xhr.status) {
+                    detail = ' (HTTP ' + xhr.status + ')';
+                }
+                logToConsole('[ERROR] Request error during JSON import' + detail + '.', 'error');
                 $('#btn-import-json').prop('disabled', false);
             }
         });
