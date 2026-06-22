@@ -171,6 +171,9 @@ class ACO_Media_Recovery_Ajax {
         // Invalidate stats transient
         delete_transient( 'aco_media_recovery_missing_local_count' );
 
+        // Add custom User-Agent filter to prevent CDN/Cloud blocking WordPress headers
+        add_filter( 'http_headers_useragent', [ __CLASS__, 'custom_user_agent' ] );
+
         $ids              = isset( $_POST['ids'] ) ? array_map( 'intval', (array) $_POST['ids'] ) : [];
         $method           = isset( $_POST['method'] ) ? sanitize_text_field( $_POST['method'] ) : 'http';
         $dry_run          = isset( $_POST['dry_run'] ) && $_POST['dry_run'] === '1';
@@ -178,6 +181,7 @@ class ACO_Media_Recovery_Ajax {
         $custom_base_url  = isset( $_POST['custom_base_url'] ) ? esc_url_raw( wp_unslash( $_POST['custom_base_url'] ) ) : '';
         $custom_local_dir = isset( $_POST['custom_local_dir'] ) ? sanitize_text_field( $_POST['custom_local_dir'] ) : '';
         $smart_overlap    = isset( $_POST['smart_overlap'] ) && $_POST['smart_overlap'] === '1';
+        $replace_existing = isset( $_POST['replace_existing'] ) && $_POST['replace_existing'] === '1';
 
         if ( empty( $ids ) ) {
             wp_send_json_error( [ 'message' => __( 'No items selected.', 'aco-media-recovery' ) ] );
@@ -218,7 +222,7 @@ class ACO_Media_Recovery_Ajax {
             $original_recovered = false;
             $details = '';
 
-            if ( $exists_locally ) {
+            if ( $exists_locally && ! $replace_existing ) {
                 $original_recovered = true;
                 $details = __( 'Local file already exists.', 'aco-media-recovery' );
             } else {
@@ -241,7 +245,7 @@ class ACO_Media_Recovery_Ajax {
                         if ( ! filter_var( $fetch_url, FILTER_VALIDATE_URL ) ) {
                             $details = __( 'Error: Could not resolve a valid HTTP url.', 'aco-media-recovery' );
                         } else {
-                            $tmp_file = download_url( $fetch_url );
+                            $tmp_file = download_url( self::safe_encode_url( $fetch_url ) );
                             if ( is_wp_error( $tmp_file ) ) {
                                 $details = sprintf( __( 'HTTP Request Failed: %s', 'aco-media-recovery' ), $tmp_file->get_error_message() );
                             } else {
@@ -255,16 +259,17 @@ class ACO_Media_Recovery_Ajax {
                             }
                         }
                     } elseif ( $method === 'offload' ) {
-                        if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
+                        if ( ! class_exists( 'ACOOFMP_Delete_From_Server_API' ) ) {
                             $details = __( 'Error: Offload Pro plugin is not active.', 'aco-media-recovery' );
                         } else {
-                            // Hook to bypass URL rewriting to local during downloader process
+                            // Use the Offload Pro pipeline: downloads original + all thumbnails
+                            // and removes the acoofmp_delete_from_server_status meta automatically.
                             add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
-                            $res = ACOOFMP_Transfer_Service::download( [ $local_path ] );
-                            if ( is_array( $res ) && in_array( 0, $res['downloaded_keys'] ) && file_exists( $local_path ) ) {
+                            $downloaded_count = ACOOFMP_Delete_From_Server_API::acoofmp_download_attachments_to_server( [ $id ] );
+                            if ( $downloaded_count > 0 && file_exists( $local_path ) ) {
                                 $original_recovered = true;
                             } else {
-                                $details = __( 'S3/Provider download failed.', 'aco-media-recovery' );
+                                $details = __( 'Offload Pro SDK download failed. Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
                             }
                         }
                     }
@@ -293,7 +298,7 @@ class ACO_Media_Recovery_Ajax {
                             $thumb_file = $size_info['file'];
                             $thumb_local = $local_dir . '/' . $thumb_file;
                             
-                            if ( file_exists( $thumb_local ) ) {
+                            if ( file_exists( $thumb_local ) && ! $replace_existing ) {
                                 $thumb_logs[] = sprintf( __( '[%s] Already exists.', 'aco-media-recovery' ), $size_name );
                                 continue;
                             }
@@ -319,7 +324,7 @@ class ACO_Media_Recovery_Ajax {
                                     $thumb_fetch_url = dirname( $fetch_url ) . '/' . $thumb_file;
                                 }
 
-                                $tmp_thumb = download_url( $thumb_fetch_url );
+                                $tmp_thumb = download_url( self::safe_encode_url( $thumb_fetch_url ) );
                                 if ( ! is_wp_error( $tmp_thumb ) ) {
                                     wp_mkdir_p( dirname( $thumb_local ) );
                                     if ( copy( $tmp_thumb, $thumb_local ) ) {
@@ -330,13 +335,12 @@ class ACO_Media_Recovery_Ajax {
                                     $thumb_error = $tmp_thumb->get_error_message();
                                 }
                             } elseif ( $method === 'offload' ) {
-                                if ( class_exists( 'ACOOFMP_Transfer_Service' ) ) {
-                                    $res_thumb = ACOOFMP_Transfer_Service::download( [ $thumb_local ] );
-                                    if ( is_array( $res_thumb ) && in_array( 0, $res_thumb['downloaded_keys'] ) && file_exists( $thumb_local ) ) {
-                                        $thumb_restored = true;
-                                    } else {
-                                        $thumb_error = __( 'Cloud key missing.', 'aco-media-recovery' );
-                                    }
+                                // The Offload Pro pipeline already downloaded all thumbnails
+                                // via acoofmp_download_attachments_to_server above.
+                                // Just verify the file landed on disk.
+                                $thumb_restored = file_exists( $thumb_local );
+                                if ( ! $thumb_restored ) {
+                                    $thumb_error = __( 'Not found on disk after SDK download.', 'aco-media-recovery' );
                                 }
                             }
 
@@ -380,11 +384,15 @@ class ACO_Media_Recovery_Ajax {
         // Invalidate stats transient
         delete_transient( 'aco_media_recovery_missing_local_count' );
 
+        // Add custom User-Agent filter to prevent CDN/Cloud blocking WordPress headers
+        add_filter( 'http_headers_useragent', [ __CLASS__, 'custom_user_agent' ] );
+
         $json_input       = isset( $_POST['json_input'] ) ? wp_unslash( $_POST['json_input'] ) : '';
         $method           = isset( $_POST['method'] ) ? sanitize_text_field( $_POST['method'] ) : 'http';
         $dry_run          = isset( $_POST['dry_run'] ) && $_POST['dry_run'] === '1';
         $auto_thumbs      = isset( $_POST['auto_thumbs'] ) && $_POST['auto_thumbs'] === '1';
         $custom_local_dir = isset( $_POST['custom_local_dir'] ) ? sanitize_text_field( $_POST['custom_local_dir'] ) : '';
+        $replace_existing = isset( $_POST['replace_existing'] ) && $_POST['replace_existing'] === '1';
 
         $items = json_decode( $json_input, true );
         if ( ! is_array( $items ) ) {
@@ -401,11 +409,20 @@ class ACO_Media_Recovery_Ajax {
             $num = $index + 1;
             $fetch_url = isset( $item['fetch_url'] ) ? sanitize_url( $item['fetch_url'] ) : '';
             $save_val = isset( $item['save_path'] ) ? sanitize_text_field( $item['save_path'] ) : '';
+            $key = isset( $item['key'] ) ? sanitize_text_field( $item['key'] ) : ( isset( $item['cloud_key'] ) ? sanitize_text_field( $item['cloud_key'] ) : '' );
 
             if ( empty( $save_val ) ) {
                 $logs[] = [
                     'status'  => 'error',
                     'message' => sprintf( __( '[Item %d] Skipped: Destination path/save_path is empty.', 'aco-media-recovery' ), $num )
+                ];
+                continue;
+            }
+
+            if ( empty( $fetch_url ) && empty( $key ) ) {
+                $logs[] = [
+                    'status'  => 'error',
+                    'message' => sprintf( __( '[Item %d] Skipped: Both "fetch_url" and "key" are empty.', 'aco-media-recovery' ), $num )
                 ];
                 continue;
             }
@@ -420,6 +437,8 @@ class ACO_Media_Recovery_Ajax {
                 continue;
             }
 
+            $db_relative_path = ltrim( str_replace( $basedir, '', $local_path ), '/' );
+
             if ( ! empty( $custom_local_dir ) ) {
                 $relative_save = ltrim( str_replace( $basedir, '', $local_path ), '/' );
                 if ( strpos( $custom_local_dir, '/' ) === 0 || preg_match( '/^[a-zA-Z]:\\\\/', $custom_local_dir ) ) {
@@ -432,52 +451,107 @@ class ACO_Media_Recovery_Ajax {
             $relative_path = ltrim( str_replace( $basedir, '', $local_path ), '/' );
             $download_success = false;
             $error_reason = '';
+            $msg_suffix = '';
 
-            if ( $method === 'http' ) {
-                if ( empty( $fetch_url ) ) {
-                    $error_reason = __( "Missing 'fetch_url' in JSON object for HTTP download mode.", 'aco-media-recovery' );
-                } else {
-                    if ( $dry_run ) {
-                        $download_success = true;
-                    } else {
-                        $tmp_file = download_url( $fetch_url );
-                        if ( is_wp_error( $tmp_file ) ) {
-                            $error_reason = sprintf( __( "HTTP Request Failed: %s", 'aco-media-recovery' ), $tmp_file->get_error_message() );
+            // Check if file already exists locally
+            if ( file_exists( $local_path ) && ! $replace_existing ) {
+                $download_success = true;
+                $msg_suffix = ' (' . __( 'Already exists locally', 'aco-media-recovery' ) . ')';
+            } else {
+                // Determine if we are downloading by key or URL
+                if ( ! empty( $key ) ) {
+                    if ( $method === 'http' ) {
+                        // For HTTP using key, we must have a custom_base_url
+                        $custom_base_url = isset( $_POST['custom_base_url'] ) ? esc_url_raw( wp_unslash( $_POST['custom_base_url'] ) ) : '';
+                        $smart_overlap   = isset( $_POST['smart_overlap'] ) && $_POST['smart_overlap'] === '1';
+
+                        if ( empty( $custom_base_url ) ) {
+                            $error_reason = __( "For HTTP download method using cloud keys, a Remote CDN/Cloud Base URL must be specified in settings.", 'aco-media-recovery' );
                         } else {
-                            wp_mkdir_p( dirname( $local_path ) );
-                            if ( copy( $tmp_file, $local_path ) ) {
-                                $download_success = true;
+                            if ( $smart_overlap ) {
+                                $fetch_url = self::join_remote_url( $custom_base_url, $key );
                             } else {
-                                $error_reason = sprintf( __( "File Write Error: Failed to copy file to %s", 'aco-media-recovery' ), $local_path );
+                                $fetch_url = trailingslashit( $custom_base_url ) . $key;
                             }
-                            @unlink( $tmp_file );
                         }
                     }
                 }
-            } elseif ( $method === 'offload' ) {
-                if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
-                    $error_reason = __( "Offload Pro plugin is not active.", 'aco-media-recovery' );
-                } else {
-                    if ( $dry_run ) {
-                        $download_success = true;
-                    } else {
-                        add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
-                        $res = ACOOFMP_Transfer_Service::download( [ $local_path ] );
-                        if ( is_array( $res ) && in_array( 0, $res['downloaded_keys'] ) && file_exists( $local_path ) ) {
+
+                // If we constructed fetch_url or we are downloading by URL
+                if ( empty( $key ) || $method === 'http' ) {
+                    if ( empty( $fetch_url ) ) {
+                        if ( empty( $error_reason ) ) {
+                            $error_reason = __( "Missing 'fetch_url' in JSON object for HTTP download mode.", 'aco-media-recovery' );
+                        }
+                    } elseif ( self::is_private_cloud_url( $fetch_url ) ) {
+                        // Private cloud API endpoints require authenticated SDK downloads.
+                        if ( ! class_exists( 'ACOOFMP_Delete_From_Server_API' ) ) {
+                            $error_reason = __( 'The fetch_url points to a private cloud storage endpoint that requires authentication (e.g. r2.cloudflarestorage.com, s3.amazonaws.com). Direct HTTP downloads are not supported for private buckets. Either use a public CDN URL, or switch the Download Method to "Offload Plugin Client" and ensure the Offload Pro plugin is active and configured.', 'aco-media-recovery' );
+                        } elseif ( $dry_run ) {
                             $download_success = true;
                         } else {
-                            $error_reason = __( "S3/Provider download failed.", 'aco-media-recovery' );
+                            // Resolve attachment ID to use the full pipeline when possible.
+                            add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
+                            $attachment_id_for_dl = self::get_attachment_id_by_path( $db_relative_path );
+                            if ( $attachment_id_for_dl ) {
+                                $downloaded_count = ACOOFMP_Delete_From_Server_API::acoofmp_download_attachments_to_server( [ $attachment_id_for_dl ] );
+                                if ( $downloaded_count > 0 && file_exists( $local_path ) ) {
+                                    $download_success = true;
+                                } else {
+                                    $error_reason = __( 'Private cloud storage download failed via Offload SDK. Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
+                                }
+                            } else {
+                                // No attachment ID — fall back to direct file-path download.
+                                $attachment_files_dl = [ 0 => [ 'original_file' => $local_path ] ];
+                                $result_dl = ACOOFMP_Delete_From_Server_API::acoofmp_download_attachement_files_from_cloud( $attachment_files_dl, '' );
+                                if ( ! empty( $result_dl ) && file_exists( $local_path ) ) {
+                                    $download_success = true;
+                                } else {
+                                    $error_reason = __( 'Private cloud storage download failed (attachment ID not found in database). Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
+                                }
+                            }
+                        }
+                    } else {
+                        if ( $dry_run ) {
+                            $download_success = true;
+                        } else {
+                            $tmp_file = download_url( self::safe_encode_url( $fetch_url ) );
+                            if ( is_wp_error( $tmp_file ) ) {
+                                $error_reason = sprintf( __( "HTTP Request Failed: %s", 'aco-media-recovery' ), $tmp_file->get_error_message() );
+                            } else {
+                                wp_mkdir_p( dirname( $local_path ) );
+                                if ( copy( $tmp_file, $local_path ) ) {
+                                    $download_success = true;
+                                } else {
+                                    $error_reason = sprintf( __( "File Write Error: Failed to copy file to %s", 'aco-media-recovery' ), $local_path );
+                                }
+                                @unlink( $tmp_file );
+                            }
+                        }
+                    }
+                } else {
+                    // Method is offload and key is provided
+                    if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
+                        $error_reason = __( "Offload Pro plugin is not active.", 'aco-media-recovery' );
+                    } elseif ( $dry_run ) {
+                        $download_success = true;
+                    } else {
+                        $status = self::download_cloud_file_by_key( $key, $local_path );
+                        if ( is_wp_error( $status ) ) {
+                            $error_reason = $status->get_error_message();
+                        } else {
+                            $download_success = true;
                         }
                     }
                 }
             }
 
             if ( $download_success ) {
-                $msg = sprintf( __( 'Recovered file: %s', 'aco-media-recovery' ), $relative_path );
+                $msg = sprintf( __( 'Recovered file: %s%s', 'aco-media-recovery' ), $relative_path, $msg_suffix );
                 $thumb_logs = [];
 
                 if ( $auto_thumbs ) {
-                    $attachment_id = self::get_attachment_id_by_path( $relative_path );
+                    $attachment_id = self::get_attachment_id_by_path( $db_relative_path );
                     if ( $attachment_id ) {
                         $meta = wp_get_attachment_metadata( $attachment_id );
                         if ( ! empty( $meta['sizes'] ) && is_array( $meta['sizes'] ) ) {
@@ -489,7 +563,7 @@ class ACO_Media_Recovery_Ajax {
                                 $thumb_file = $size_info['file'];
                                 $thumb_local = $local_dir . '/' . $thumb_file;
 
-                                if ( file_exists( $thumb_local ) ) {
+                                if ( file_exists( $thumb_local ) && ! $replace_existing ) {
                                     $thumb_logs[] = sprintf( __( '[%s] Already exists.', 'aco-media-recovery' ), $size_name );
                                     continue;
                                 }
@@ -502,9 +576,18 @@ class ACO_Media_Recovery_Ajax {
                                 $thumb_restored = false;
                                 $thumb_error = '';
 
-                                if ( $method === 'http' ) {
+                                if ( ! empty( $key ) && $method === 'offload' ) {
+                                    $thumb_key = ( dirname( $key ) === '.' || dirname( $key ) === '/' ) ? $thumb_file : dirname( $key ) . '/' . $thumb_file;
+                                    $thumb_key = str_replace( '\\', '/', $thumb_key );
+                                    $status_thumb = self::download_cloud_file_by_key( $thumb_key, $thumb_local );
+                                    if ( is_wp_error( $status_thumb ) ) {
+                                        $thumb_error = $status_thumb->get_error_message();
+                                    } else {
+                                        $thumb_restored = true;
+                                    }
+                                } elseif ( $method === 'http' ) {
                                     $thumb_fetch_url = dirname( $fetch_url ) . '/' . $thumb_file;
-                                    $tmp_thumb = download_url( $thumb_fetch_url );
+                                    $tmp_thumb = download_url( self::safe_encode_url( $thumb_fetch_url ) );
                                     if ( ! is_wp_error( $tmp_thumb ) ) {
                                         wp_mkdir_p( dirname( $thumb_local ) );
                                         if ( copy( $tmp_thumb, $thumb_local ) ) {
@@ -552,10 +635,62 @@ class ACO_Media_Recovery_Ajax {
     }
 
     /**
+     * Downloads a file from cloud storage using its exact key and saves it locally.
+     * Works for both Amazon S3 and Google Cloud Storage using active Pro credentials.
+     * 
+     * @param string $cloud_key   The S3/GCS object key (e.g., '2026/04/file.jpg').
+     * @param string $local_path  The absolute local filesystem path to save the file.
+     * @return bool|WP_Error      True on success, WP_Error object on failure.
+     */
+    private static function download_cloud_file_by_key( $cloud_key, $local_path ) {
+        if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
+            return new WP_Error( 'class_missing', __( 'Offload Media Cloud Storage Pro plugin is not active.', 'aco-media-recovery' ) );
+        }
+
+        // 1. Temporarily hook a filter to force our custom key for the specific local path
+        $override_key_filter = function( $generated_key, $file_path ) use ( $cloud_key, $local_path ) {
+            // Normalize slashes to ensure matching works on Windows and Linux
+            if ( wp_normalize_path( $file_path ) === wp_normalize_path( $local_path ) ) {
+                return $cloud_key;
+            }
+            return $generated_key;
+        };
+
+        add_filter( 'acoofmp_generate_upload_key', $override_key_filter, 10, 2 );
+
+        // 2. Prevent path rewrites from interfering
+        add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
+
+        // 3. Trigger the Pro plugin's native credentials/download service
+        $result = ACOOFMP_Transfer_Service::download( array( $local_path ) );
+
+        // 4. Remove the temporary filters
+        remove_filter( 'acoofmp_generate_upload_key', $override_key_filter, 10 );
+        remove_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
+
+        // 5. Verify download status from transfer service results
+        if ( is_array( $result ) && in_array( 0, $result['downloaded_keys'] ) ) {
+            return true;
+        }
+
+        return new WP_Error( 
+            'download_failed', 
+            __( 'S3/GCS client failed to download the key. Verify that your cloud storage credentials are correct and that the key exists in your bucket.', 'aco-media-recovery' )
+        );
+    }
+
+    /**
      * Helper to resolve local path from absolute/relative/URL save paths.
+     *
+     * Handles the following save_path input formats:
+     *   - Full URLs:              https://example.com/wp-content/uploads/2026/04/img.jpg
+     *   - Absolute server paths:  /var/www/html/wp-content/uploads/2026/04/img.jpg
+     *   - Uploads-relative paths: 2026/04/img.jpg
+     *   - wp-content prefixed:    wp-content/uploads/2026/04/img.jpg
      */
     private static function resolve_local_path( $save_value, $basedir, $baseurl ) {
-        if ( filter_var( $save_value, FILTER_VALIDATE_URL ) ) {
+        // 1. Full URL — strip known base or extract from wp-content/uploads/ pattern.
+        if ( strpos( $save_value, 'http://' ) === 0 || strpos( $save_value, 'https://' ) === 0 ) {
             if ( strpos( $save_value, $baseurl ) === 0 ) {
                 return $basedir . substr( $save_value, strlen( $baseurl ) );
             }
@@ -564,12 +699,42 @@ class ACO_Media_Recovery_Ajax {
             }
             return '';
         }
-        
+
+        // 2. Absolute server path — use as-is.
         if ( strpos( $save_value, '/' ) === 0 || preg_match( '/^[a-zA-Z]:\\\\/', $save_value ) ) {
             return $save_value;
         }
 
+        // 3. Relative path beginning with wp-content/uploads/ — strip the prefix.
+        if ( preg_match( '#^wp-content/uploads/(.+)$#', ltrim( $save_value, '/' ), $matches ) ) {
+            return $basedir . '/' . $matches[1];
+        }
+
+        // 4. Plain uploads-relative path — prepend basedir directly.
         return $basedir . '/' . ltrim( $save_value, '/' );
+    }
+
+    /**
+     * Detect whether a URL points to a private cloud storage API endpoint
+     * (e.g. r2.cloudflarestorage.com, s3.amazonaws.com, storage.googleapis.com)
+     * that requires signed authentication and cannot be downloaded via plain HTTP.
+     */
+    private static function is_private_cloud_url( $url ) {
+        $private_patterns = [
+            '/\.r2\.cloudflarestorage\.com/i',
+            '/\.s3\.amazonaws\.com/i',
+            '/\.s3\.[a-z0-9-]+\.amazonaws\.com/i',
+            '/storage\.googleapis\.com/i',
+            '/\.digitaloceanspaces\.com/i',
+            '/\.wasabisys\.com/i',
+            '/\.backblazeb2\.com/i',
+        ];
+        foreach ( $private_patterns as $pattern ) {
+            if ( preg_match( $pattern, $url ) ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -633,6 +798,44 @@ class ACO_Media_Recovery_Ajax {
         }
         
         return $remote_base . $relative_path;
+    }
+
+    /**
+     * Custom User Agent to bypass server/CDN bot protection.
+     */
+    public static function custom_user_agent( $user_agent ) {
+        return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+    }
+
+    /**
+     * Parse and safely encode URL path segments (to resolve spaces, brackets, etc.) without double-encoding.
+     */
+    public static function safe_encode_url( $url ) {
+        if ( strpos( $url, 'http://' ) !== 0 && strpos( $url, 'https://' ) !== 0 ) {
+            return $url;
+        }
+        $parts = parse_url( $url );
+        $scheme = isset( $parts['scheme'] ) ? $parts['scheme'] . '://' : '';
+        $host   = isset( $parts['host'] ) ? $parts['host'] : '';
+        $port   = isset( $parts['port'] ) ? ':' . $parts['port'] : '';
+        $user   = isset( $parts['user'] ) ? $parts['user'] : '';
+        $pass   = isset( $parts['pass'] ) ? ':' . $parts['pass']  : '';
+        $pass   = ($user || $pass) ? "$pass@" : '';
+        
+        $path   = isset( $parts['path'] ) ? $parts['path'] : '';
+        if ( ! empty( $path ) ) {
+            $path_segments = explode( '/', $path );
+            $encoded_segments = [];
+            foreach ( $path_segments as $segment ) {
+                $encoded_segments[] = rawurlencode( rawurldecode( $segment ) );
+            }
+            $path = implode( '/', $encoded_segments );
+        }
+        
+        $query  = isset( $parts['query'] ) ? '?' . $parts['query'] : '';
+        $fragment = isset( $parts['fragment'] ) ? '#' . $parts['fragment'] : '';
+        
+        return "$scheme$user$pass$host$port$path$query$fragment";
     }
 }
 

@@ -327,6 +327,7 @@ jQuery(document).ready(function ($) {
         var customBaseUrl = $('#custom_base_url').val().trim();
         var customLocalDir = $('#custom_local_dir').val().trim();
         var smartOverlap = $('#smart_overlap').prop('checked') ? '1' : '0';
+        var replaceExisting = $('#replace_existing').prop('checked') ? '1' : '0';
 
         var total = ids.length;
         var processed = 0;
@@ -362,7 +363,8 @@ jQuery(document).ready(function ($) {
                     dry_run: dryRun,
                     custom_base_url: customBaseUrl,
                     custom_local_dir: customLocalDir,
-                    smart_overlap: smartOverlap
+                    smart_overlap: smartOverlap,
+                    replace_existing: replaceExisting
                 },
                 success: function (res) {
                     if (res.success && res.data.logs) {
@@ -412,6 +414,7 @@ jQuery(document).ready(function ($) {
         var autoThumbs = $('#auto_thumbs').prop('checked') ? '1' : '0';
         var dryRun = $('#dry_run').prop('checked') ? '1' : '0';
         var customLocalDir = $('#custom_local_dir').val().trim();
+        var replaceExisting = $('#replace_existing').prop('checked') ? '1' : '0';
 
         logToConsole('[START] Initiated JSON Custom Import...', 'title');
         if (dryRun === '1') {
@@ -428,7 +431,8 @@ jQuery(document).ready(function ($) {
                 method: method,
                 auto_thumbs: autoThumbs,
                 dry_run: dryRun,
-                custom_local_dir: customLocalDir
+                custom_local_dir: customLocalDir,
+                replace_existing: replaceExisting
             },
             success: function (res) {
                 if (res.success && res.data.logs) {

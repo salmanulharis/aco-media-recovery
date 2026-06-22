@@ -89,9 +89,13 @@ if ( ! defined( 'ABSPATH' ) ) {
   {
     "fetch_url": "https://media.bullerautomotive.com/wp-content/uploads/2026/04/image.jpg",
     "save_path": "2026/04/image.jpg"
+  },
+  {
+    "key": "2026/04/image2.jpg",
+    "save_path": "2026/04/image2.jpg"
   }
 ]'></textarea>
-                <p class="acomr-description"><?php _e( 'Paste JSON mappings to manually trigger bulk recovery of specific files.', 'aco-media-recovery' ); ?></p>
+                <p class="acomr-description"><?php _e( 'Paste JSON mappings (supporting both "fetch_url" for URLs and "key" for direct S3/GCS keys) to manually trigger bulk recovery of specific files.', 'aco-media-recovery' ); ?></p>
             </div>
             <button class="acomr-btn acomr-btn-primary" id="btn-import-json"><?php _e( 'Start Batch JSON Import', 'aco-media-recovery' ); ?></button>
         </div>
@@ -119,6 +123,10 @@ if ( ! defined( 'ABSPATH' ) ) {
                         <label class="acomr-checkbox-label">
                             <input type="checkbox" id="auto_thumbs" checked>
                             <span><strong><?php _e( 'Auto-Detect & Recover Thumbnails', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Find and download all size versions from attachment metadata.', 'aco-media-recovery' ); ?></small></span>
+                        </label>
+                        <label class="acomr-checkbox-label">
+                            <input type="checkbox" id="replace_existing">
+                            <span><strong><?php _e( 'Replace Existing Local Files', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Download and overwrite files that already exist on the local disk.', 'aco-media-recovery' ); ?></small></span>
                         </label>
                         <label class="acomr-checkbox-label">
                             <input type="checkbox" id="dry_run">

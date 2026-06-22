@@ -1,10 +1,9 @@
 === Media Cloud Storage Debug & Recovery Tool ===
-Contributors: antigravity-ai
-Donate link: https://google.com
+Contributors: acowebs
 Tags: media, recovery, cloud, offload, s3, gcs, r2
 Requires at least: 5.8
 Tested up to: 6.5
-Stable tag: 2.0.0
+Stable tag: 1.0.0   
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -24,7 +23,7 @@ The Media Cloud Storage Debug & Recovery Tool is a robust utility designed to wo
 
 == Installation ==
 
-1. Upload the `debug-plugin` folder to the `/wp-content/plugins/` directory, or install the ZIP file via the WordPress plugin uploader.
+1. Upload the `aco-media-recovery` folder to the `/wp-content/plugins/` directory, or install the ZIP file via the WordPress plugin uploader.
 2. Activate the plugin through the 'Plugins' menu in WordPress.
 3. Access the dashboard from **Tools -> Media Recovery Tool** in the admin sidebar.
 
@@ -38,12 +37,13 @@ All providers supported by Offload Media Cloud Storage Pro are supported, includ
 
 == Changelog ==
 
-= 2.0.0 =
+= 1.0.0 =
+* Added auto-generate thumbnails for each attachment file.
+
+= 1.0.0 =
 * UI Redesign (modern minimal WordPress light theme dashboard).
 * Added 3-tab layout navigation.
 * Added custom local destination paths and remote base URL configurations.
 * Implemented smart overlap detection to prevent duplicate folders.
 * Added cloud storage credentials visibility with secure masking and toggle reveal.
-
-= 1.0.0 =
 * Initial release of the recovery utility.
