@@ -42,6 +42,11 @@ jQuery(document).ready(function ($) {
             }
         });
 
+        // Hide CDN group if offload method is active on page load
+        if ($('input[name="download_method"]:checked').val() === 'offload') {
+            $('#cdn-url-group').hide();
+        }
+
         // Database scan trigger
         $('#btn-scan').on('click', function () {
             state.page = 1;
@@ -111,6 +116,49 @@ jQuery(document).ready(function ($) {
                 return;
             }
             startJsonImport(jsonText);
+        });
+
+        // Save settings trigger
+        $('#btn-save-settings').on('click', function () {
+            var btn = $(this);
+            btn.prop('disabled', true).text('Saving...');
+            
+            var method = $('input[name="download_method"]:checked').val();
+            var autoThumbs = $('#auto_thumbs').prop('checked') ? '1' : '0';
+            var dryRun = $('#dry_run').prop('checked') ? '1' : '0';
+            var customBaseUrl = $('#custom_base_url').val().trim();
+            var customLocalDir = $('#custom_local_dir').val().trim();
+            var smartOverlap = $('#smart_overlap').prop('checked') ? '1' : '0';
+            var replaceExisting = $('#replace_existing').prop('checked') ? '1' : '0';
+
+            $.ajax({
+                url: ACO_Media_Recovery_Settings.ajax_url,
+                method: 'POST',
+                data: {
+                    action: 'aco_media_recovery_save_settings',
+                    security: ACO_Media_Recovery_Settings.nonce,
+                    download_method: method,
+                    auto_thumbs: autoThumbs,
+                    dry_run: dryRun,
+                    custom_base_url: customBaseUrl,
+                    custom_local_dir: customLocalDir,
+                    smart_overlap: smartOverlap,
+                    replace_existing: replaceExisting
+                },
+                success: function (res) {
+                    if (res.success) {
+                        alert(res.data.message);
+                    } else {
+                        alert('Error: ' + res.data.message);
+                    }
+                },
+                error: function () {
+                    alert('Error saving settings.');
+                },
+                complete: function () {
+                    btn.prop('disabled', false).text('Save Settings');
+                }
+            });
         });
 
         // Clear console

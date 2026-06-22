@@ -10,6 +10,7 @@ class ACO_Media_Recovery_Ajax {
         add_action( 'wp_ajax_aco_media_recovery_fetch_filenames', [ __CLASS__, 'fetch_filenames' ] );
         add_action( 'wp_ajax_aco_media_recovery_recover_files', [ __CLASS__, 'recover_files' ] );
         add_action( 'wp_ajax_aco_media_recovery_manual_import', [ __CLASS__, 'manual_import' ] );
+        add_action( 'wp_ajax_aco_media_recovery_save_settings', [ __CLASS__, 'save_settings' ] );
     }
 
     /**
@@ -466,7 +467,11 @@ class ACO_Media_Recovery_Ajax {
                         $smart_overlap   = isset( $_POST['smart_overlap'] ) && $_POST['smart_overlap'] === '1';
 
                         if ( empty( $custom_base_url ) ) {
-                            $error_reason = __( "For HTTP download method using cloud keys, a Remote CDN/Cloud Base URL must be specified in settings.", 'aco-media-recovery' );
+                            $custom_base_url = self::get_cloud_base_url();
+                        }
+
+                        if ( empty( $custom_base_url ) ) {
+                            $error_reason = __( "For HTTP download method using cloud keys, a Remote CDN/Cloud Base URL must be specified in settings, and could not be auto-detected from Offload Media.", 'aco-media-recovery' );
                         } else {
                             if ( $smart_overlap ) {
                                 $fetch_url = self::join_remote_url( $custom_base_url, $key );
@@ -836,6 +841,179 @@ class ACO_Media_Recovery_Ajax {
         $fragment = isset( $parts['fragment'] ) ? '#' . $parts['fragment'] : '';
         
         return "$scheme$user$pass$host$port$path$query$fragment";
+    }
+
+    /**
+     * Save plugin settings.
+     */
+    public static function save_settings() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $download_method  = isset( $_POST['download_method'] ) ? sanitize_text_field( $_POST['download_method'] ) : 'http';
+        $auto_thumbs      = isset( $_POST['auto_thumbs'] ) && $_POST['auto_thumbs'] === '1';
+        $replace_existing = isset( $_POST['replace_existing'] ) && $_POST['replace_existing'] === '1';
+        $dry_run          = isset( $_POST['dry_run'] ) && $_POST['dry_run'] === '1';
+        $custom_base_url  = isset( $_POST['custom_base_url'] ) ? esc_url_raw( wp_unslash( $_POST['custom_base_url'] ) ) : '';
+        $smart_overlap    = isset( $_POST['smart_overlap'] ) && $_POST['smart_overlap'] === '1';
+        $custom_local_dir = isset( $_POST['custom_local_dir'] ) ? sanitize_text_field( $_POST['custom_local_dir'] ) : '';
+
+        $settings = [
+            'download_method'  => $download_method,
+            'auto_thumbs'      => $auto_thumbs,
+            'replace_existing' => $replace_existing,
+            'dry_run'          => $dry_run,
+            'custom_base_url'  => $custom_base_url,
+            'smart_overlap'    => $smart_overlap,
+            'custom_local_dir' => $custom_local_dir,
+        ];
+
+        update_option( 'aco_media_recovery_settings', $settings );
+
+        wp_send_json_success( [ 'message' => __( 'Settings saved successfully.', 'aco-media-recovery' ) ] );
+    }
+
+    /**
+     * Get saved plugin settings with defaults.
+     */
+    public static function get_saved_settings() {
+        $defaults = [
+            'download_method'  => 'http',
+            'auto_thumbs'      => true,
+            'replace_existing' => false,
+            'dry_run'          => false,
+            'custom_base_url'  => '',
+            'smart_overlap'    => true,
+            'custom_local_dir' => '',
+        ];
+
+        $saved = get_option( 'aco_media_recovery_settings', [] );
+        return array_merge( $defaults, is_array( $saved ) ? $saved : [] );
+    }
+
+    /**
+     * Resolve the active cloud base URL (SDK or CDN) from Offload plugin settings.
+     */
+    public static function get_cloud_base_url() {
+        // 1. Try Pro class helper
+        if ( class_exists( 'ACOOFMP_URL_Rewrite_Service' ) && method_exists( 'ACOOFMP_URL_Rewrite_Service', 'acoofmp_get_cloud_base_url' ) ) {
+            $base_url = ACOOFMP_URL_Rewrite_Service::acoofmp_get_cloud_base_url();
+            if ( ! empty( $base_url ) ) {
+                return $base_url;
+            }
+        }
+
+        // 2. Build it ourselves using active credentials fallback logic
+        $general_settings = [];
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $general_settings = ACOOFMP_Settings_Helper::get_general_settings();
+        } else {
+            $general_settings = get_option( 'acoofmp_general_settings', [] );
+        }
+
+        // Check if CDN is active
+        if ( ! empty( $general_settings['enable_cdn'] ) && ! empty( $general_settings['cdn_endpoint_url'] ) ) {
+            return trailingslashit( $general_settings['cdn_endpoint_url'] );
+        }
+
+        // Get provider settings
+        $s = null;
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $s = ACOOFMP_Settings_Helper::get_provider_settings();
+        }
+        
+        // Use our database fallback logic
+        if ( empty( $s ) || empty( $s['provider'] ) ) {
+            $pro_settings = get_option( 'acoofmp_storage_settings', [] );
+            if ( is_array( $pro_settings ) && ! empty( $pro_settings['provider'] ) ) {
+                $connection_method = $pro_settings['connection_method'] ?? 'wp-options';
+                $provider = $pro_settings['provider'] ?? '';
+                $bucket = $pro_settings['bucket'] ?? '';
+                $region = $pro_settings['region'] ?? '';
+                $credentials = [];
+
+                if ( $connection_method === 'wp-config' && defined( 'ACOOFM_SETTINGS' ) ) {
+                    $cfg = maybe_unserialize( ACOOFM_SETTINGS );
+                    if ( is_array( $cfg ) ) {
+                        $credentials = [
+                            'accountId' => $cfg['account-id'] ?? $cfg['accountId'] ?? '',
+                            'endpoint'  => $cfg['endpoint'] ?? '',
+                        ];
+                    }
+                } else {
+                    $credentials = $pro_settings['credentials'] ?? [];
+                }
+
+                $s = [
+                    'provider'    => $provider,
+                    'credentials' => $credentials,
+                    'bucket'      => $bucket,
+                    'region'      => $region,
+                ];
+            }
+        }
+
+        if ( empty( $s ) || empty( $s['provider'] ) ) {
+            $free_settings = get_option( 'acoofm_settings', [] );
+            if ( is_array( $free_settings ) && ! empty( $free_settings['service'] ) && is_array( $free_settings['service'] ) ) {
+                $provider = $free_settings['service']['slug'] ?? '';
+                $f_creds = $free_settings['credentials'] ?? [];
+                $connection_method = $f_creds['connection_method'] ?? 'wp_options';
+
+                $credentials = [];
+                $bucket = $f_creds['bucket_name'] ?? '';
+                $region = $f_creds['region'] ?? '';
+
+                if ( $connection_method === 'wp_config' && defined( 'ACOOFM_SETTINGS' ) ) {
+                    $cfg = maybe_unserialize( ACOOFM_SETTINGS );
+                    if ( is_array( $cfg ) ) {
+                        $credentials = [
+                            'accountId' => $cfg['account-id'] ?? $cfg['accountId'] ?? '',
+                            'endpoint'  => $cfg['endpoint'] ?? '',
+                        ];
+                        if ( empty( $bucket ) ) $bucket = $cfg['bucket'] ?? $cfg['bucket-name'] ?? '';
+                        if ( empty( $region ) ) $region = $cfg['region'] ?? '';
+                    }
+                } else {
+                    $credentials = [
+                        'accountId' => $f_creds['project_id'] ?? '',
+                        'endpoint'  => $f_creds['endpoint'] ?? '',
+                    ];
+                }
+
+                $s = [
+                    'provider'    => $provider,
+                    'credentials' => $credentials,
+                    'bucket'      => $bucket,
+                    'region'      => $region,
+                ];
+            }
+        }
+
+        if ( ! empty( $s ) && ! empty( $s['provider'] ) ) {
+            switch ( $s['provider'] ) {
+                case 's3':
+                    return "https://{$s['bucket']}.s3.{$s['region']}.amazonaws.com/";
+                case 'google':
+                    return "https://storage.googleapis.com/{$s['bucket']}/";
+                case 'r2':
+                    $accountId = $s['credentials']['accountId'] ?? '';
+                    return "https://{$accountId}.r2.cloudflarestorage.com/{$s['bucket']}/";
+                case 'ocean':
+                case 'digitalocean':
+                    return "https://{$s['bucket']}.{$s['region']}.digitaloceanspaces.com/";
+                case 'wasabi':
+                    return "https://s3.{$s['region']}.wasabisys.com/{$s['bucket']}/";
+                case 'minio':
+                    $endpoint = rtrim( $s['credentials']['endpoint'] ?? '', '/' );
+                    return $endpoint ? $endpoint . '/' : '';
+            }
+        }
+
+        return '';
     }
 }
 

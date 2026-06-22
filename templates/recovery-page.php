@@ -3,6 +3,7 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
+$acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
 ?>
 <div class="wrap acomr-recovery-container">
     <div class="acomr-header">
@@ -109,11 +110,11 @@ if ( ! defined( 'ABSPATH' ) ) {
                         <label><?php _e( 'Download Method', 'aco-media-recovery' ); ?></label>
                         <div class="acomr-radio-group">
                             <label class="acomr-radio-label">
-                                <input type="radio" name="download_method" value="http" checked>
+                                <input type="radio" name="download_method" value="http" <?php checked( $acomr_settings['download_method'], 'http' ); ?>>
                                 <span><strong><?php _e( 'Direct HTTP Download', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Download files from a public URL using WordPress filesystem.', 'aco-media-recovery' ); ?></small></span>
                             </label>
                             <label class="acomr-radio-label">
-                                <input type="radio" name="download_method" value="offload">
+                                <input type="radio" name="download_method" value="offload" <?php checked( $acomr_settings['download_method'], 'offload' ); ?>>
                                 <span><strong><?php _e( 'Offload Plugin Client', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Download files using active cloud provider credentials.', 'aco-media-recovery' ); ?></small></span>
                             </label>
                         </div>
@@ -121,15 +122,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 
                     <div class="acomr-form-group acomr-checkbox-group">
                         <label class="acomr-checkbox-label">
-                            <input type="checkbox" id="auto_thumbs" checked>
+                            <input type="checkbox" id="auto_thumbs" <?php checked( $acomr_settings['auto_thumbs'] ); ?>>
                             <span><strong><?php _e( 'Auto-Detect & Recover Thumbnails', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Find and download all size versions from attachment metadata.', 'aco-media-recovery' ); ?></small></span>
                         </label>
                         <label class="acomr-checkbox-label">
-                            <input type="checkbox" id="replace_existing">
+                            <input type="checkbox" id="replace_existing" <?php checked( $acomr_settings['replace_existing'] ); ?>>
                             <span><strong><?php _e( 'Replace Existing Local Files', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Download and overwrite files that already exist on the local disk.', 'aco-media-recovery' ); ?></small></span>
                         </label>
                         <label class="acomr-checkbox-label">
-                            <input type="checkbox" id="dry_run">
+                            <input type="checkbox" id="dry_run" <?php checked( $acomr_settings['dry_run'] ); ?>>
                             <span><strong><?php _e( 'Simulation Mode (Dry Run)', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Test path resolution and remote access without saving files.', 'aco-media-recovery' ); ?></small></span>
                         </label>
                     </div>
@@ -139,23 +140,27 @@ if ( ! defined( 'ABSPATH' ) ) {
                 <div class="acomr-settings-col">
                     <div class="acomr-form-group" id="cdn-url-group">
                         <label for="custom_base_url"><?php _e( 'Remote CDN / Cloud Base URL (Optional)', 'aco-media-recovery' ); ?></label>
-                        <input type="url" id="custom_base_url" placeholder="e.g., https://media.bullerautomotive.com/wp-content/uploads/2026/04/">
+                        <input type="url" id="custom_base_url" value="<?php echo esc_url( $acomr_settings['custom_base_url'] ); ?>" placeholder="e.g., https://media.bullerautomotive.com/wp-content/uploads/2026/04/">
                         <p class="acomr-description"><?php _e( 'Specify the remote URL to download files from. e.g. folder name: https://media.bullerautomotive.com/wp-content/uploads/', 'aco-media-recovery' ); ?></p>
                     </div>
 
                     <div class="acomr-form-group">
                         <label class="acomr-checkbox-label">
-                            <input type="checkbox" id="smart_overlap" checked>
+                            <input type="checkbox" id="smart_overlap" <?php checked( $acomr_settings['smart_overlap'] ); ?>>
                             <span><strong><?php _e( 'Enable Smart Overlap Matching', 'aco-media-recovery' ); ?></strong><br><small><?php _e( 'Prevent duplicate folders (like 2026/04/2026/04/) when remote base and file path directories overlap.', 'aco-media-recovery' ); ?></small></span>
                         </label>
                     </div>
 
                     <div class="acomr-form-group">
                         <label for="custom_local_dir"><?php _e( 'Custom Local Save Path (Optional)', 'aco-media-recovery' ); ?></label>
-                        <input type="text" id="custom_local_dir" placeholder="e.g. restored-files">
+                        <input type="text" id="custom_local_dir" value="<?php echo esc_attr( $acomr_settings['custom_local_dir'] ); ?>" placeholder="e.g. restored-files">
                         <p class="acomr-description"><?php _e( 'Enter a folder name under the uploads directory to save files in a custom folder, or leave blank to save to their original database location.', 'aco-media-recovery' ); ?></p>
                     </div>
                 </div>
+            </div>
+
+            <div class="acomr-form-group" style="margin-top: 15px;">
+                <button type="button" class="acomr-btn acomr-btn-primary" id="btn-save-settings"><?php _e( 'Save Settings', 'aco-media-recovery' ); ?></button>
             </div>
 
             <!-- Offload Credentials Panel -->
