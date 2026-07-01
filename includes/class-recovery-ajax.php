@@ -11,6 +11,9 @@ class ACO_Media_Recovery_Ajax {
         add_action( 'wp_ajax_aco_media_recovery_recover_files', [ __CLASS__, 'recover_files' ] );
         add_action( 'wp_ajax_aco_media_recovery_manual_import', [ __CLASS__, 'manual_import' ] );
         add_action( 'wp_ajax_aco_media_recovery_save_settings', [ __CLASS__, 'save_settings' ] );
+        add_action( 'wp_ajax_aco_media_recovery_run_health_checks', [ __CLASS__, 'run_health_checks' ] );
+        add_action( 'wp_ajax_aco_media_recovery_fetch_not_offloaded', [ __CLASS__, 'fetch_not_offloaded' ] );
+        add_action( 'wp_ajax_aco_media_recovery_fetch_attachment_diagnostics', [ __CLASS__, 'fetch_attachment_diagnostics' ] );
     }
 
     /**
@@ -1026,6 +1029,570 @@ class ACO_Media_Recovery_Ajax {
         }
 
         return '';
+    }
+
+    /**
+     * Run proactive health checks.
+     */
+    public static function run_health_checks() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $checks = [];
+
+        // 1. PHP cURL module
+        $has_curl = extension_loaded( 'curl' );
+        $checks[] = [
+            'title'   => __( 'PHP cURL Extension', 'aco-media-recovery' ),
+            'status'  => $has_curl ? 'success' : 'critical',
+            'message' => $has_curl 
+                ? __( 'PHP cURL extension is loaded.', 'aco-media-recovery' ) 
+                : __( 'PHP cURL extension is missing. Cloud SDKs require cURL to perform HTTP requests.', 'aco-media-recovery' ),
+            'fix'     => $has_curl ? '' : __( 'Enable the cURL extension in your php.ini configuration.', 'aco-media-recovery' )
+        ];
+
+        // 2. Upload Directory Permissions
+        $uploads = wp_get_upload_dir();
+        $basedir = $uploads['basedir'];
+        $is_writable = is_writable( $basedir );
+        $checks[] = [
+            'title'   => __( 'Uploads Folder Write Permissions', 'aco-media-recovery' ),
+            'status'  => $is_writable ? 'success' : 'critical',
+            'message' => $is_writable 
+                ? sprintf( __( 'Uploads directory is writable: %s', 'aco-media-recovery' ), $basedir ) 
+                : sprintf( __( 'Uploads directory is NOT writable: %s. This prevents recovery and offload downloads.', 'aco-media-recovery' ), $basedir ),
+            'fix'     => $is_writable ? '' : __( 'Adjust folder permissions (e.g. 755 or 775) and owner settings for your WordPress uploads directory.', 'aco-media-recovery' )
+        ];
+
+        // 3. Offload Media Pro Activation
+        $pro_active = class_exists( 'ACOOFMP_Transfer_Service' );
+        $free_active = class_exists( 'ACOOFMF_Rewriteurl' ) || class_exists( 'ACOOFM_Rewriteurl' );
+        $checks[] = [
+            'title'   => __( 'Offload Media Pro Activation', 'aco-media-recovery' ),
+            'status'  => $pro_active ? 'success' : ( $free_active ? 'warning' : 'critical' ),
+            'message' => $pro_active 
+                ? __( 'Offload Media Pro is active.', 'aco-media-recovery' ) 
+                : ( $free_active 
+                    ? __( 'Offload Media Pro is not active, but Offload Media Free is active. Some advanced features might be restricted.', 'aco-media-recovery' )
+                    : __( 'Neither Offload Media Pro nor Free plugin is active.', 'aco-media-recovery' ) ),
+            'fix'     => $pro_active ? '' : __( 'Install and activate Offload Media Pro to utilize full cloud storage sync and custom domain mapping.', 'aco-media-recovery' )
+        ];
+
+        // 4. Cloud Settings & Provider Configured
+        $s = null;
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $s = ACOOFMP_Settings_Helper::get_provider_settings();
+        }
+        
+        $provider_configured = ! empty( $s ) && ! empty( $s['provider'] );
+        $checks[] = [
+            'title'   => __( 'Cloud Provider Configuration', 'aco-media-recovery' ),
+            'status'  => $provider_configured ? 'success' : 'critical',
+            'message' => $provider_configured 
+                ? sprintf( __( 'Active provider: %s, Bucket: %s', 'aco-media-recovery' ), esc_html( $s['provider'] ), esc_html( $s['bucket'] ) ) 
+                : __( 'No active cloud provider configured. S3, GCS, or R2 credentials are missing.', 'aco-media-recovery' ),
+            'fix'     => $provider_configured ? '' : __( 'Go to Offload Media Settings and configure your cloud bucket and connection method.', 'aco-media-recovery' )
+        ];
+
+        // 5. Cloud Connectivity & Credentials Test
+        $client_connected = false;
+        $connection_err = '';
+        if ( $provider_configured ) {
+            try {
+                if ( class_exists( 'ACOOFMP_Provider_Connection_Service' ) ) {
+                    $client_connected = ACOOFMP_Provider_Connection_Service::verify_credentials( $s['provider'], $s['credentials'] );
+                    if ( ! $client_connected ) {
+                        $connection_err = __( 'Verification returned false. Please verify your credentials/region/permissions.', 'aco-media-recovery' );
+                    }
+                } else {
+                    $connection_err = __( 'Credential connection service not found.', 'aco-media-recovery' );
+                }
+            } catch ( \Exception $e ) {
+                $connection_err = $e->getMessage();
+            }
+
+            $checks[] = [
+                'title'   => __( 'Cloud Storage Connectivity Check', 'aco-media-recovery' ),
+                'status'  => $client_connected ? 'success' : 'critical',
+                'message' => $client_connected 
+                    ? __( 'Connected successfully to cloud storage provider APIs.', 'aco-media-recovery' ) 
+                    : sprintf( __( 'Failed to connect to cloud storage provider. Error: %s', 'aco-media-recovery' ), $connection_err ),
+                'fix'     => $client_connected ? '' : __( 'Verify that your access keys, secret key, account ID, or key files are correct, and that the server has internet access.', 'aco-media-recovery' )
+            ];
+        }
+
+        // 6. Loopback Request Success
+        $loopback_success = false;
+        $loopback_err = '';
+        $loopback_url = admin_url( 'admin-ajax.php' );
+        $response = wp_remote_post( $loopback_url, [
+            'timeout'   => 5,
+            'body'      => [ 'action' => 'aco_media_recovery_loopback_test' ],
+            'sslverify' => false // Keep it lenient for local environments
+        ] );
+
+        if ( is_wp_error( $response ) ) {
+            $loopback_err = $response->get_error_message();
+        } else {
+            $code = wp_remote_retrieve_response_code( $response );
+            // 200 or 400 is fine (400 just means action wasn't registered or failed nonce, but connection reached PHP)
+            if ( $code >= 200 && $code < 500 ) {
+                $loopback_success = true;
+            } else {
+                $loopback_err = sprintf( __( 'HTTP Status %d returned.', 'aco-media-recovery' ), $code );
+            }
+        }
+
+        $checks[] = [
+            'title'   => __( 'Server Loopback Connections', 'aco-media-recovery' ),
+            'status'  => $loopback_success ? 'success' : 'warning',
+            'message' => $loopback_success 
+                ? __( 'Server loopback requests are functional. Background processing/async upload tasks will work.', 'aco-media-recovery' ) 
+                : sprintf( __( 'Loopback request failed: %s. This can prevent background uploads or downloads from finishing.', 'aco-media-recovery' ), $loopback_err ),
+            'fix'     => $loopback_success ? '' : __( 'Check for local SSL/DNS issues, basic auth, or local security configuration blocking curl loopback to your site URL.', 'aco-media-recovery' )
+        ];
+
+        // 7. WP-Cron Status Check
+        $cron_disabled = defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON;
+        $checks[] = [
+            'title'   => __( 'WordPress Cron Status', 'aco-media-recovery' ),
+            'status'  => $cron_disabled ? 'info' : 'success',
+            'message' => $cron_disabled 
+                ? __( 'WP-Cron is disabled (DISABLE_WP_CRON is true). Ensure you have configured a system cron task (crontab).', 'aco-media-recovery' ) 
+                : __( 'WP-Cron is enabled and running normally.', 'aco-media-recovery' ),
+            'fix'     => $cron_disabled ? __( 'Verify that a server system cron job triggers wp-cron.php every few minutes to process scheduled background tasks.', 'aco-media-recovery' ) : ''
+        ];
+
+        // 8. Database Anomalies & Orphaned Metadata Check
+        global $wpdb;
+        $orphaned_sync_count = (int) $wpdb->get_var( "
+            SELECT COUNT(pm.meta_id) 
+            FROM {$wpdb->postmeta} pm 
+            LEFT JOIN {$wpdb->posts} p ON pm.post_id = p.ID 
+            WHERE pm.meta_key = 'acoofmp_sync_to_cloud_status' 
+              AND (p.ID IS NULL OR p.post_type != 'attachment')
+        " );
+
+        $checks[] = [
+            'title'   => __( 'Orphaned Offload Metadata', 'aco-media-recovery' ),
+            'status'  => ( $orphaned_sync_count > 0 ) ? 'warning' : 'success',
+            'message' => ( $orphaned_sync_count > 0 ) 
+                ? sprintf( __( 'Detected %d orphaned offload metadata records pointing to deleted attachments.', 'aco-media-recovery' ), $orphaned_sync_count ) 
+                : __( 'No orphaned offload metadata records found.', 'aco-media-recovery' ),
+            'fix'     => ( $orphaned_sync_count > 0 ) ? __( 'Clean up orphaned metadata via a plugin or run a database optimization routine.', 'aco-media-recovery' ) : ''
+        ];
+
+        // 9. Duplicate Attached Files
+        $duplicate_files = $wpdb->get_results( "
+            SELECT meta_value, COUNT(post_id) as file_count 
+            FROM {$wpdb->postmeta} 
+            WHERE meta_key = '_wp_attached_file' 
+              AND meta_value != '' 
+            GROUP BY meta_value 
+            HAVING file_count > 1 
+            LIMIT 10
+        " );
+        $duplicate_count = count( $duplicate_files );
+
+        $checks[] = [
+            'title'   => __( 'Duplicate Media File Attachments', 'aco-media-recovery' ),
+            'status'  => ( $duplicate_count > 0 ) ? 'warning' : 'success',
+            'message' => ( $duplicate_count > 0 ) 
+                ? sprintf( __( 'Detected duplicate attachments referencing the same local path (e.g. %s).', 'aco-media-recovery' ), esc_html( $duplicate_files[0]->meta_value ) ) 
+                : __( 'No duplicate media path references found.', 'aco-media-recovery' ),
+            'fix'     => ( $duplicate_count > 0 ) ? __( 'Avoid duplicating database records for the same physical media file. Clean up duplicates to avoid cloud syncing conflicts.', 'aco-media-recovery' ) : ''
+        ];
+
+        // 10. URL Rewrite Config Check
+        $general_settings = [];
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $general_settings = ACOOFMP_Settings_Helper::get_general_settings();
+        }
+        $rewrites_enabled = ! empty( $general_settings['rewrite_media_urls'] );
+        $checks[] = [
+            'title'   => __( 'URL Rewriting Configuration', 'aco-media-recovery' ),
+            'status'  => $rewrites_enabled ? 'success' : 'warning',
+            'message' => $rewrites_enabled 
+                ? __( 'URL Rewriting is enabled. Cloud URLs will replace local URLs.', 'aco-media-recovery' ) 
+                : __( 'URL Rewriting is disabled in general settings. Files are offloaded but local URLs will still be used.', 'aco-media-recovery' ),
+            'fix'     => $rewrites_enabled ? '' : __( 'Enable "Rewrite Media URLs" in Offload Media settings to serve media files directly from the cloud/CDN.', 'aco-media-recovery' )
+        ];
+
+        wp_send_json_success( [ 'checks' => $checks ] );
+    }
+
+    /**
+     * Fetch not offloaded attachments with pagination and issue checks.
+     */
+    public static function fetch_not_offloaded() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        global $wpdb;
+
+        $page     = isset( $_POST['page'] ) ? max( 1, intval( $_POST['page'] ) ) : 1;
+        $per_page = isset( $_POST['per_page'] ) ? intval( $_POST['per_page'] ) : 15;
+        $search   = isset( $_POST['search'] ) ? sanitize_text_field( $_POST['search'] ) : '';
+
+        $uploads  = wp_get_upload_dir();
+        $basedir  = $uploads['basedir'];
+
+        // S3 client to verify credentials/permissions checks
+        $provider_active = false;
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $s = ACOOFMP_Settings_Helper::get_provider_settings();
+            if ( ! empty( $s ) && ! empty( $s['provider'] ) ) {
+                $provider_active = true;
+            }
+        }
+
+        // Build SQL to fetch attachments NOT offloaded
+        $where = [ "p.post_type = 'attachment'", "p.post_status != 'trash'" ];
+        $params = [];
+
+        // Left join status meta and check for NOT LIKE or NULL
+        $where[] = "(pm_status.meta_value IS NULL OR pm_status.meta_value NOT LIKE '%\"status\";s:9:\"offloaded\"%')";
+
+        if ( ! empty( $search ) ) {
+            $where[] = "(p.post_title LIKE %s OR pm_file.meta_value LIKE %s OR p.ID = %d)";
+            $search_like = '%' . $wpdb->esc_like( $search ) . '%';
+            $params[] = $search_like;
+            $params[] = $search_like;
+            $params[] = intval( $search );
+        }
+
+        $where_sql = 'WHERE ' . implode( ' AND ', $where );
+
+        // Count query
+        $count_query = "
+            SELECT COUNT(p.ID) 
+            FROM {$wpdb->posts} p 
+            LEFT JOIN {$wpdb->postmeta} pm_status ON p.ID = pm_status.post_id AND pm_status.meta_key = 'acoofmp_sync_to_cloud_status'
+            LEFT JOIN {$wpdb->postmeta} pm_file ON p.ID = pm_file.post_id AND pm_file.meta_key = '_wp_attached_file'
+            {$where_sql}
+        ";
+        $count_sql = $params ? $wpdb->prepare( $count_query, ...$params ) : $count_query;
+        $total_count = (int) $wpdb->get_var( $count_sql );
+
+        // Paginated query
+        $offset = ( $page - 1 ) * $per_page;
+        $query = "
+            SELECT p.ID, p.post_title, p.post_mime_type, pm_file.meta_value as filepath, p.post_date
+            FROM {$wpdb->posts} p
+            LEFT JOIN {$wpdb->postmeta} pm_status ON p.ID = pm_status.post_id AND pm_status.meta_key = 'acoofmp_sync_to_cloud_status'
+            LEFT JOIN {$wpdb->postmeta} pm_file ON p.ID = pm_file.post_id AND pm_file.meta_key = '_wp_attached_file'
+            {$where_sql}
+            ORDER BY p.ID DESC
+            LIMIT %d OFFSET %d
+        ";
+        
+        $params[] = $per_page;
+        $params[] = $offset;
+        $sql = $wpdb->prepare( $query, ...$params );
+        $results = $wpdb->get_results( $sql );
+
+        $items = [];
+        foreach ( $results as $row ) {
+            $id = (int) $row->ID;
+            $filepath = $row->filepath;
+            $mime = $row->post_mime_type;
+
+            // Run issue priority checks
+            $issue = __( 'Offload metadata missing (Pending Offload)', 'aco-media-recovery' );
+            $severity = 'info';
+
+            // 1. Invalid path
+            if ( empty( $filepath ) ) {
+                $issue = __( 'Attachment exists but file path is invalid', 'aco-media-recovery' );
+                $severity = 'critical';
+            } else {
+                $local_path = $basedir . '/' . ltrim( $filepath, '/' );
+
+                // 2. Local file missing
+                if ( ! file_exists( $local_path ) ) {
+                    $issue = __( 'Local file missing', 'aco-media-recovery' );
+                    $severity = 'critical';
+                } else {
+                    // 3. Corrupt/missing metadata
+                    $meta = wp_get_attachment_metadata( $id );
+                    if ( empty( $meta ) || ! is_array( $meta ) ) {
+                        $issue = __( 'Missing or corrupted attachment metadata', 'aco-media-recovery' );
+                        $severity = 'warning';
+                    } else {
+                        // 4. Unsupported file type
+                        $ext = pathinfo( $filepath, PATHINFO_EXTENSION );
+                        if ( empty( $ext ) || empty( $mime ) ) {
+                            $issue = __( 'Unsupported file type', 'aco-media-recovery' );
+                            $severity = 'warning';
+                        } elseif ( ! $provider_active ) {
+                            // 5. Credentials issue
+                            $issue = __( 'Storage credentials or permissions issue', 'aco-media-recovery' );
+                            $severity = 'warning';
+                        }
+                    }
+                }
+            }
+
+            $items[] = [
+                'id'       => $id,
+                'title'    => $row->post_title,
+                'filename' => $filepath ? $filepath : __( 'Unknown filename', 'aco-media-recovery' ),
+                'mime'     => $mime,
+                'date'     => $row->post_date,
+                'issue'    => $issue,
+                'severity' => $severity,
+            ];
+        }
+
+        wp_send_json_success( [
+            'items'       => $items,
+            'total_count' => $total_count,
+            'pages'       => ceil( $total_count / $per_page ),
+            'current'     => $page,
+        ] );
+    }
+
+    /**
+     * Deep dive diagnostics for a single attachment.
+     */
+    public static function fetch_attachment_diagnostics() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $id = isset( $_POST['id'] ) ? intval( $_POST['id'] ) : 0;
+        if ( ! $id ) {
+            wp_send_json_error( [ 'message' => __( 'Invalid Attachment ID.', 'aco-media-recovery' ) ] );
+        }
+
+        $post = get_post( $id );
+        if ( ! $post || $post->post_type !== 'attachment' ) {
+            wp_send_json_error( [ 'message' => __( 'Attachment not found.', 'aco-media-recovery' ) ] );
+        }
+
+        $uploads  = wp_get_upload_dir();
+        $basedir  = $uploads['basedir'];
+        $baseurl  = $uploads['baseurl'];
+
+        $file = get_post_meta( $id, '_wp_attached_file', true );
+        $local_path = ! empty( $file ) ? $basedir . '/' . ltrim( $file, '/' ) : '';
+        $local_url = ! empty( $file ) ? $baseurl . '/' . ltrim( $file, '/' ) : '';
+
+        // Exists & Permissions
+        $exists_locally = ! empty( $local_path ) && file_exists( $local_path );
+        $readable = $exists_locally && is_readable( $local_path );
+        $writable = $exists_locally && is_writable( $local_path );
+        $size = $exists_locally ? filesize( $local_path ) : 0;
+
+        // Metadata
+        $meta_data = get_post_meta( $id, '_wp_attachment_metadata', true );
+        $offload_meta = get_post_meta( $id, 'acoofmp_sync_to_cloud_status', true );
+        $is_offloaded = is_array( $offload_meta ) && ( $offload_meta['status'] ?? '' ) === 'offloaded';
+
+        // Gen Key
+        $upload_key = '';
+        if ( ! empty( $file ) ) {
+            if ( class_exists( 'ACOOFMP_Upload_Key_Generator' ) ) {
+                $upload_key = ACOOFMP_Upload_Key_Generator::generate( $file );
+            } else {
+                $settings = get_option( 'acoofmp_general_settings', [] );
+                $prefix = trim( $settings['path_prefix'] ?? '', '/' );
+                $upload_key = $prefix ? $prefix . '/' . ltrim( $file, '/' ) : ltrim( $file, '/' );
+            }
+        }
+
+        // Provider Details
+        $s = null;
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $s = ACOOFMP_Settings_Helper::get_provider_settings();
+        }
+        
+        $provider = $s['provider'] ?? '';
+        $bucket = $s['bucket'] ?? '';
+        $region = $s['region'] ?? '';
+
+        // Check Remote Existence (S3/GCS using Reflection)
+        $remote_exists = false;
+        $remote_check_status = 'unavailable';
+
+        if ( $provider && $bucket && ! empty( $upload_key ) ) {
+            try {
+                if ( class_exists( 'ACOOFMP_Provider_Factory' ) ) {
+                    $client = ACOOFMP_Provider_Factory::make( $provider, $s['credentials'], $bucket, $region );
+                    if ( $client ) {
+                        $checked = false;
+                        
+                        // S3Client check
+                        if ( property_exists( $client, 'client' ) && $client->client && method_exists( $client->client, 'doesObjectExist' ) ) {
+                            $remote_exists = $client->client->doesObjectExist( $bucket, $upload_key );
+                            $checked = true;
+                        }
+                        
+                        // GCSClient / general Reflection check
+                        if ( ! $checked ) {
+                            $ref = new \ReflectionClass( $client );
+                            if ( $ref->hasProperty( 'bucket' ) ) {
+                                $prop = $ref->getProperty( 'bucket' );
+                                $prop->setAccessible( true );
+                                $bucketObj = $prop->getValue( $client );
+                                if ( is_object( $bucketObj ) && method_exists( $bucketObj, 'object' ) ) {
+                                    $object = $bucketObj->object( $upload_key );
+                                    if ( is_object( $object ) && method_exists( $object, 'exists' ) ) {
+                                        $remote_exists = $object->exists();
+                                        $checked = true;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if ( $checked ) {
+                            $remote_check_status = $remote_exists ? 'exists' : 'missing';
+                        }
+                    }
+                }
+            } catch ( \Exception $e ) {
+                $remote_check_status = 'error';
+            }
+        }
+
+        // Rewrite status
+        $rewritten_url = $local_url;
+        if ( ! empty( $local_url ) && class_exists( 'ACOOFMP_Provider_Helpers' ) ) {
+            $rewritten_url = ACOOFMP_Provider_Helpers::acoofmp_rewrite_url( $local_url, $id );
+        }
+        $rewrite_active = ( $rewritten_url !== $local_url );
+
+        // Prerequisites and detected issues
+        $prereqs = [];
+        $issues = [];
+
+        // Check 1: File Exists
+        $prereqs[] = [
+            'name'   => __( 'Local File Presence', 'aco-media-recovery' ),
+            'status' => $exists_locally ? 'pass' : 'fail',
+            'desc'   => $exists_locally ? __( 'Physical file exists on local drive.', 'aco-media-recovery' ) : __( 'Physical file is missing from uploads folder.', 'aco-media-recovery' )
+        ];
+        if ( ! $exists_locally ) {
+            $issues[] = [
+                'severity' => 'critical',
+                'title'    => __( 'Local File Missing', 'aco-media-recovery' ),
+                'desc'     => __( 'The file database record is registered, but the file was deleted or not uploaded locally. Offloader cannot sync files that do not exist.', 'aco-media-recovery' ),
+                'fix'      => __( 'Upload the file to the server uploads path manually, or restore from a backup.', 'aco-media-recovery' )
+            ];
+        }
+
+        // Check 2: Readable
+        if ( $exists_locally ) {
+            $prereqs[] = [
+                'name'   => __( 'Local File Readability', 'aco-media-recovery' ),
+                'status' => $readable ? 'pass' : 'fail',
+                'desc'   => $readable ? __( 'File can be read by server processes.', 'aco-media-recovery' ) : __( 'File is not readable due to permission settings.', 'aco-media-recovery' )
+            ];
+            if ( ! $readable ) {
+                $issues[] = [
+                    'severity' => 'critical',
+                    'title'    => __( 'File Read Permission Error', 'aco-media-recovery' ),
+                    'desc'     => __( 'The web server (PHP/Apache) has no read permissions for this file.', 'aco-media-recovery' ),
+                    'fix'      => __( 'Change file permissions to 644 or correct owner settings.', 'aco-media-recovery' )
+                ];
+            }
+        }
+
+        // Check 3: Attachment Metadata
+        $meta_valid = ! empty( $meta_data ) && is_array( $meta_data );
+        $prereqs[] = [
+            'name'   => __( 'Attachment Metadata Integrity', 'aco-media-recovery' ),
+            'status' => $meta_valid ? 'pass' : 'fail',
+            'desc'   => $meta_valid ? __( 'Attachment metadata structure is populated.', 'aco-media-recovery' ) : __( 'Attachment metadata is empty or corrupted.', 'aco-media-recovery' )
+        ];
+        if ( ! $meta_valid ) {
+            $issues[] = [
+                'severity' => 'warning',
+                'title'    => __( 'Corrupted or Missing Attachment Metadata', 'aco-media-recovery' ),
+                'desc'     => __( 'WordPress attachment metadata (_wp_attachment_metadata) is empty. Some offloaders skip files with empty attachment metadata.', 'aco-media-recovery' ),
+                'fix'      => __( 'Regenerate thumbnails/metadata using plugins like Regenerate Thumbnails.', 'aco-media-recovery' )
+            ];
+        }
+
+        // Check 4: Cloud Storage Credentials
+        $creds_valid = $provider && $bucket;
+        $prereqs[] = [
+            'name'   => __( 'Cloud Connection Config', 'aco-media-recovery' ),
+            'status' => $creds_valid ? 'pass' : 'fail',
+            'desc'   => $creds_valid ? __( 'Cloud provider and bucket are set.', 'aco-media-recovery' ) : __( 'Cloud credentials or bucket options are missing.', 'aco-media-recovery' )
+        ];
+        if ( ! $creds_valid ) {
+            $issues[] = [
+                'severity' => 'critical',
+                'title'    => __( 'Cloud Provider Settings Missing', 'aco-media-recovery' ),
+                'desc'     => __( 'Offload plugin cannot connect because settings are not saved.', 'aco-media-recovery' ),
+                'fix'      => __( 'Go to Offload settings, complete setup, and save options.', 'aco-media-recovery' )
+            ];
+        }
+
+        // Object check warning if not found
+        if ( $creds_valid && $remote_check_status === 'missing' && ! $is_offloaded ) {
+            $issues[] = [
+                'severity' => 'info',
+                'title'    => __( 'Pending Cloud Offload', 'aco-media-recovery' ),
+                'desc'     => __( 'This file is not yet uploaded to the cloud storage bucket.', 'aco-media-recovery' ),
+                'fix'      => __( 'Trigger the manual sync option in media library, or execute Offload in the debugger.', 'aco-media-recovery' )
+            ];
+        } elseif ( $is_offloaded && $remote_check_status === 'missing' ) {
+            $issues[] = [
+                'severity' => 'critical',
+                'title'    => __( 'Orphaned Cloud Meta / Missing Remote Object', 'aco-media-recovery' ),
+                'desc'     => __( 'The file is marked as offloaded in WordPress, but it was not found in the storage bucket. The object might have been deleted from cloud directly.', 'aco-media-recovery' ),
+                'fix'      => __( 'Trigger re-upload to cloud storage, or reset the offload status to Local.', 'aco-media-recovery' )
+            ];
+        }
+
+        // Response payload
+        wp_send_json_success( [
+            'info' => [
+                'id'          => $id,
+                'title'       => $post->post_title,
+                'filename'    => $file,
+                'mime'        => $post->post_mime_type,
+                'upload_path' => $local_path,
+                'upload_date' => $post->post_date,
+                'size'        => $size ? size_format( $size ) : __( 'N/A', 'aco-media-recovery' ),
+            ],
+            'metadata' => [
+                'attachment_metadata' => $meta_data,
+                'offload_metadata'    => $offload_meta,
+            ],
+            'file_checks' => [
+                'exists'   => $exists_locally,
+                'readable' => $readable,
+                'writable' => $writable,
+            ],
+            'upload_key'     => $upload_key,
+            'provider'       => [
+                'provider' => $provider,
+                'bucket'   => $bucket,
+                'region'   => $region,
+            ],
+            'remote' => [
+                'status' => $remote_check_status,
+                'exists' => $remote_exists,
+            ],
+            'rewrite' => [
+                'status'        => $rewrite_active,
+                'original_url'  => $local_url,
+                'rewritten_url' => $rewritten_url,
+            ],
+            'prereqs' => $prereqs,
+            'issues'  => $issues,
+        ] );
     }
 }
 

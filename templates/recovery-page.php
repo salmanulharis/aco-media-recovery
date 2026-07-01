@@ -37,6 +37,7 @@ $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
             <button class="acomr-tab-btn active" data-tab="tab-scanner"><?php _e( 'Scan & Recover', 'aco-media-recovery' ); ?></button>
             <button class="acomr-tab-btn" data-tab="tab-json"><?php _e( 'Manual JSON Import', 'aco-media-recovery' ); ?></button>
             <button class="acomr-tab-btn" data-tab="tab-settings"><?php _e( 'Settings', 'aco-media-recovery' ); ?></button>
+            <button class="acomr-tab-btn" data-tab="tab-diagnostics"><?php _e( 'Diagnostics & Health', 'aco-media-recovery' ); ?></button>
         </div>
 
         <!-- TAB 1: Database Scanning -->
@@ -333,6 +334,60 @@ $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
                 <?php else : ?>
                     <p class="acomr-description"><?php _e( 'Offload Cloud Storage plugin settings are not configured. Unable to read credentials.', 'aco-media-recovery' ); ?></p>
                 <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- TAB 4: Diagnostics & Health -->
+        <div class="acomr-tab-content" id="tab-diagnostics">
+            <!-- 1. System Health Audit Section -->
+            <div class="acomr-diagnostics-section" style="margin-bottom: 30px;">
+                <div class="acomr-section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #1d2327;"><?php _e( 'Proactive System Health Audit', 'aco-media-recovery' ); ?></h3>
+                    <button class="acomr-btn acomr-btn-primary" id="btn-run-health-checks"><?php _e( 'Run Health Audit', 'aco-media-recovery' ); ?></button>
+                </div>
+                <p class="acomr-description" style="margin-bottom: 15px;"><?php _e( 'Perform proactive tests to surface configuration issues, cloud storage connectivity, loopbacks, crons, permissions, and database anomalies.', 'aco-media-recovery' ); ?></p>
+                
+                <div class="acomr-health-checks-list" id="health-checks-list">
+                    <p class="acomr-table-placeholder"><?php _e( 'Click "Run Health Audit" to analyze system status.', 'aco-media-recovery' ); ?></p>
+                </div>
+            </div>
+
+            <hr class="acomr-divider" style="margin: 30px 0; border: 0; border-top: 1px solid #dcdcde;">
+
+            <!-- 2. Not Offloaded Files Section -->
+            <div class="acomr-diagnostics-section">
+                <div class="acomr-section-header" style="margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #1d2327;"><?php _e( 'Not Offloaded Attachments Diagnostics', 'aco-media-recovery' ); ?></h3>
+                </div>
+                <p class="acomr-description" style="margin-bottom: 15px;"><?php _e( 'Lists all attachments that are currently not offloaded to cloud storage, highlighting the most probable root cause.', 'aco-media-recovery' ); ?></p>
+                
+                <div class="acomr-table-actions" style="margin-bottom: 15px;">
+                    <div class="acomr-actions-left" style="display: flex; gap: 8px; align-items: center;">
+                        <input type="text" id="diagnostics-search" placeholder="<?php _e( 'Search by filename or ID...', 'aco-media-recovery' ); ?>" style="padding: 6px 10px; font-size: 13px; border: 1px solid #8c8f94; border-radius: 4px; width: 250px;">
+                        <button class="acomr-btn acomr-btn-secondary acomr-btn-icon" id="btn-refresh-diagnostics" title="<?php _e( 'Refresh list', 'aco-media-recovery' ); ?>">&#8635;</button>
+                    </div>
+                </div>
+
+                <div class="acomr-table-container">
+                    <table class="acomr-media-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid #dcdcde; background-color: #f6f7f7;">
+                                <th width="80" style="padding: 10px; font-weight: 600;"><?php _e( 'ID', 'aco-media-recovery' ); ?></th>
+                                <th style="padding: 10px; font-weight: 600;"><?php _e( 'Filename', 'aco-media-recovery' ); ?></th>
+                                <th width="150" style="padding: 10px; font-weight: 600;"><?php _e( 'Upload Date', 'aco-media-recovery' ); ?></th>
+                                <th width="350" style="padding: 10px; font-weight: 600;"><?php _e( 'Highest-Priority Probable Issue', 'aco-media-recovery' ); ?></th>
+                                <th width="120" style="padding: 10px; font-weight: 600; text-align: right;"><?php _e( 'Actions', 'aco-media-recovery' ); ?></th>
+                            </tr>
+                        </thead>
+                        <tbody id="diagnostics-table-body">
+                            <tr>
+                                <td colspan="5" class="acomr-table-placeholder" style="padding: 20px; text-align: center; color: #646970;"><?php _e( 'Click the refresh icon or load the list to view non-offloaded attachments.', 'aco-media-recovery' ); ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="acomr-table-pagination" id="diagnostics-pagination" style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center;"></div>
             </div>
         </div>
     </div>

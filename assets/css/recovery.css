@@ -716,3 +716,39 @@ textarea#json_input:focus {
     font-size: 12px;
 }
 
+/* Diagnostics & Health Styles */
+.acomr-health-card {
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.acomr-health-card:hover {
+    box-shadow: 0 3px 10px rgba(0,0,0,0.06) !important;
+}
+.acomr-check-critical {
+    border-left-color: #dc3232 !important;
+}
+.acomr-check-warning {
+    border-left-color: #ffb900 !important;
+}
+.acomr-check-info {
+    border-left-color: #007cba !important;
+}
+.acomr-check-success {
+    border-left-color: #46b450 !important;
+}
+
+.acomr-diagnostic-report table td {
+    color: #2c3338;
+}
+.acomr-diagnostic-report table tr:last-child {
+    border-bottom: none !important;
+}
+
+.acomr-details-row td {
+    padding: 0 !important;
+}
+
+.btn-view-diagnostics {
+    font-size: 11px !important;
+    padding: 4px 8px !important;
+}
+

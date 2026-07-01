@@ -7,7 +7,9 @@ jQuery(document).ready(function ($) {
         filter: 'missing',
         tab: 'tab-scanner',
         selected: [],
-        items: [] // List of items on current page
+        items: [], // List of items on current page
+        diagnostics_page: 1,
+        diagnostics_search: ''
     };
 
     // Ensure the AJAX URL scheme matches the current page protocol to prevent SSL/Redirect POST drops
@@ -200,6 +202,76 @@ jQuery(document).ready(function ($) {
                 container.text(maskedVal);
                 $(this).html('&#128065;'); // Switch back to eye icon
                 $(this).attr('title', 'Reveal Key');
+            }
+        });
+
+        // Tab click event: if diagnostics tab is clicked, fetch diagnostics list
+        $('.acomr-tab-btn').on('click', function () {
+            var target = $(this).data('tab');
+            if (target === 'tab-diagnostics') {
+                loadDiagnosticsList();
+            }
+        });
+
+        // Run health checks button
+        $('#btn-run-health-checks').on('click', function() {
+            runHealthChecks();
+        });
+
+        // Diagnostics refresh list
+        $('#btn-refresh-diagnostics').on('click', function() {
+            state.diagnostics_page = 1;
+            loadDiagnosticsList();
+        });
+
+        // Diagnostics search input
+        var diagSearchTimeout = null;
+        $('#diagnostics-search').on('keyup', function() {
+            clearTimeout(diagSearchTimeout);
+            var query = $(this).val();
+            diagSearchTimeout = setTimeout(function() {
+                state.diagnostics_search = query;
+                state.diagnostics_page = 1;
+                loadDiagnosticsList();
+            }, 500);
+        });
+
+        // Pagination links for diagnostics
+        $(document).on('click', '.acomr-diag-page-link', function () {
+            if ($(this).hasClass('active') || $(this).prop('disabled')) {
+                return;
+            }
+            state.diagnostics_page = parseInt($(this).data('page'));
+            loadDiagnosticsList();
+        });
+
+        // Expand / collapse details
+        $(document).on('click', '.btn-view-diagnostics', function() {
+            var btn = $(this);
+            var id = btn.data('id');
+            var mainRow = btn.closest('tr');
+            var detailsRowId = 'diagnostics-details-' + id;
+            var detailsRow = $('#' + detailsRowId);
+
+            if (detailsRow.length > 0) {
+                detailsRow.toggle();
+                if (detailsRow.is(':visible')) {
+                    btn.text('Hide Details');
+                } else {
+                    btn.text('View Details');
+                }
+            } else {
+                btn.prop('disabled', true).text('Loading...');
+                // Create a temporary row
+                var tempRow = $('<tr class="acomr-details-row" id="' + detailsRowId + '">' +
+                                '<td colspan="5" style="padding: 15px; background: #fafafa; border-bottom: 1px solid #dcdcde;">' +
+                                '<div class="acomr-details-loading" style="text-align: center; color: #646970; font-style: italic;">' +
+                                'Loading comprehensive diagnostic report...' +
+                                '</div>' +
+                                '</td>' +
+                                '</tr>');
+                mainRow.after(tempRow);
+                loadAttachmentDiagnostics(id, tempRow, btn);
             }
         });
 
@@ -582,6 +654,318 @@ jQuery(document).ready(function ($) {
                 }
                 logToConsole('[ERROR] Request error during JSON import' + detail + '.', 'error');
                 $('#btn-import-json').prop('disabled', false);
+            }
+        });
+    }
+
+    /**
+     * Run the Proactive System Health Audit.
+     */
+    function runHealthChecks() {
+        var listContainer = $('#health-checks-list');
+        listContainer.html('<div class="acomr-table-placeholder">Running diagnostic health audit... Please wait.</div>');
+        $('#btn-run-health-checks').prop('disabled', true).text('Running...');
+
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_run_health_checks',
+                security: ACO_Media_Recovery_Settings.nonce
+            },
+            success: function(res) {
+                if (res && res.success && res.data && res.data.checks) {
+                    var html = '<div class="acomr-health-checks-grid" style="display: grid; grid-template-columns: 1fr; gap: 15px;">';
+                    res.data.checks.forEach(function(check) {
+                        var statusClass = 'acomr-check-' + check.status;
+                        var icon = '&#9432;'; // Info icon
+                        if (check.status === 'success') {
+                            icon = '&#9989;'; // Green check
+                        } else if (check.status === 'critical') {
+                            icon = '&#10060;'; // Red cross
+                        } else if (check.status === 'warning') {
+                            icon = '&#9888;'; // Warning sign
+                        }
+
+                        var borderLeftColor = '#2271b1';
+                        if (check.status === 'critical') borderLeftColor = '#dc3232';
+                        else if (check.status === 'warning') borderLeftColor = '#ffb900';
+                        else if (check.status === 'success') borderLeftColor = '#46b450';
+
+                        var badgeBg = '#f0f6fc';
+                        var badgeTextColor = '#007cba';
+                        if (check.status === 'critical') { badgeBg = '#fdf2f2'; badgeTextColor = '#dc3232'; }
+                        else if (check.status === 'warning') { badgeBg = '#fffdf6'; badgeTextColor = '#ffb900'; }
+                        else if (check.status === 'success') { badgeBg = '#f0fcf0'; badgeTextColor = '#46b450'; }
+
+                        html += '<div class="acomr-health-card ' + statusClass + '" style="background: #ffffff; border: 1px solid #dcdcde; border-left: 5px solid ' + borderLeftColor + '; border-radius: 4px; padding: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">';
+                        html += '  <div class="acomr-check-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">';
+                        html += '    <h4 style="margin: 0; font-size: 14px; font-weight: 600; color: #1d2327;">' + icon + ' ' + check.title + '</h4>';
+                        html += '    <span class="acomr-badge-status status-' + check.status + '" style="text-transform: uppercase; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; background-color: ' + badgeBg + '; color: ' + badgeTextColor + ';">' + check.status + '</span>';
+                        html += '  </div>';
+                        html += '  <p class="acomr-check-message" style="margin: 0 0 8px 0; font-size: 13px; color: #2c3338;">' + check.message + '</p>';
+                        if (check.fix) {
+                            html += '  <div class="acomr-check-fix" style="background: #f6f7f7; border: 1px solid #dcdcde; padding: 8px 12px; border-radius: 4px; font-size: 12px; margin-top: 10px; color: #2c3338;">';
+                            html += '    <strong>Suggested Resolution:</strong> ' + check.fix;
+                            html += '  </div>';
+                        }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                    listContainer.html(html);
+                } else {
+                    listContainer.html('<div class="acomr-table-placeholder log-error">Error running health checks: ' + (res.data && res.data.message ? res.data.message : 'Unknown error') + '</div>');
+                }
+            },
+            error: function() {
+                listContainer.html('<div class="acomr-table-placeholder log-error">Failed to complete system health checks request.</div>');
+            },
+            complete: function() {
+                $('#btn-run-health-checks').prop('disabled', false).text('Run Health Audit');
+            }
+        });
+    }
+
+    /**
+     * Load the non-offloaded attachments diagnostics list.
+     */
+    function loadDiagnosticsList() {
+        var tbody = $('#diagnostics-table-body');
+        tbody.html('<tr><td colspan="5" class="acomr-table-placeholder">Fetching non-offloaded attachments...</td></tr>');
+
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_fetch_not_offloaded',
+                security: ACO_Media_Recovery_Settings.nonce,
+                page: state.diagnostics_page,
+                per_page: 15,
+                search: state.diagnostics_search
+            },
+            success: function(res) {
+                if (res && res.success && res.data) {
+                    renderDiagnosticsTable(res.data.items);
+                    renderDiagnosticsPagination(res.data.pages, res.data.current, res.data.total_count);
+                } else {
+                    tbody.html('<tr><td colspan="5" class="acomr-table-placeholder log-error">Error fetching list: ' + (res.data && res.data.message ? res.data.message : 'Unknown error') + '</td></tr>');
+                }
+            },
+            error: function() {
+                tbody.html('<tr><td colspan="5" class="acomr-table-placeholder log-error">Failed to query not-offloaded attachments.</td></tr>');
+            }
+        });
+    }
+
+    /**
+     * Render the non-offloaded items.
+     */
+    function renderDiagnosticsTable(items) {
+        var tbody = $('#diagnostics-table-body');
+        if (items.length === 0) {
+            tbody.html('<tr><td colspan="5" class="acomr-table-placeholder">All attachments are successfully offloaded, or no attachments match criteria!</td></tr>');
+            return;
+        }
+
+        var html = '';
+        items.forEach(function(item) {
+            var badgeColor = 'background-color: #f6f7f7; color: #50575e;';
+            if (item.severity === 'critical') {
+                badgeColor = 'background-color: #fcf0f0; color: #d94f4f; border: 1px solid #f5c2c2;';
+            } else if (item.severity === 'warning') {
+                badgeColor = 'background-color: #fdfaf2; color: #cca300; border: 1px solid #fbebcb;';
+            } else if (item.severity === 'info') {
+                badgeColor = 'background-color: #f0f6fc; color: #2271b1; border: 1px solid #c2dbf0;';
+            }
+
+            html += '<tr style="border-bottom: 1px solid #dcdcde;">';
+            html += '  <td style="padding: 12px 10px; font-weight: 500;">' + item.id + '</td>';
+            html += '  <td style="padding: 12px 10px;"><strong>' + escapeHtml(item.title) + '</strong><br><code style="font-size: 11px; color: #646970;">' + escapeHtml(item.filename) + '</code></td>';
+            html += '  <td style="padding: 12px 10px; color: #646970; font-size: 13px;">' + item.date + '</td>';
+            html += '  <td style="padding: 12px 10px;"><span style="display: inline-block; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 4px; ' + badgeColor + '">' + item.issue + '</span></td>';
+            html += '  <td style="padding: 12px 10px; text-align: right;"><button class="acomr-btn acomr-btn-secondary btn-view-diagnostics" data-id="' + item.id + '">View Details</button></td>';
+            html += '</tr>';
+        });
+        tbody.html(html);
+    }
+
+    /**
+     * Diagnostics Pagination
+     */
+    function renderDiagnosticsPagination(totalPages, current, totalCount) {
+        var pagination = $('#diagnostics-pagination');
+        pagination.empty();
+
+        if (totalCount === 0) return;
+
+        var startEntry = (current - 1) * 15 + 1;
+        var endEntry = Math.min(current * 15, totalCount);
+
+        var html = '<span class="acomr-pagination-info" style="font-size: 13px; color: #646970;">Showing ' + startEntry + ' to ' + endEntry + ' of ' + totalCount + ' non-offloaded attachments</span>';
+        html += '<div style="display: flex; gap: 4px;">';
+        html += '  <button class="acomr-diag-page-link" data-page="1" ' + (current === 1 ? 'disabled' : '') + ' style="padding: 4px 8px; border: 1px solid #8c8f94; border-radius: 4px; background: #fff; cursor: pointer;">&laquo;</button>';
+        html += '  <button class="acomr-diag-page-link" data-page="' + (current - 1) + '" ' + (current === 1 ? 'disabled' : '') + ' style="padding: 4px 8px; border: 1px solid #8c8f94; border-radius: 4px; background: #fff; cursor: pointer;">&lsaquo;</button>';
+
+        var startPage = Math.max(1, current - 2);
+        var endPage = Math.min(totalPages, current + 2);
+
+        for (var i = startPage; i <= endPage; i++) {
+            var activeStyle = (i === current) ? 'background-color: #2271b1; color: #fff; border-color: #2271b1;' : 'background: #fff;';
+            html += '  <button class="acomr-diag-page-link" data-page="' + i + '" style="padding: 4px 10px; border: 1px solid #8c8f94; border-radius: 4px; ' + activeStyle + ' cursor: pointer;">' + i + '</button>';
+        }
+
+        html += '  <button class="acomr-diag-page-link" data-page="' + (current + 1) + '" ' + (current === totalPages ? 'disabled' : '') + ' style="padding: 4px 8px; border: 1px solid #8c8f94; border-radius: 4px; background: #fff; cursor: pointer;">&rsaquo;</button>';
+        html += '  <button class="acomr-diag-page-link" data-page="' + totalPages + '" ' + (current === totalPages ? 'disabled' : '') + ' style="padding: 4px 8px; border: 1px solid #8c8f94; border-radius: 4px; background: #fff; cursor: pointer;">&raquo;</button>';
+        html += '</div>';
+
+        pagination.html(html);
+    }
+
+    /**
+     * Load Deep-Dive diagnostics for a single item.
+     */
+    function loadAttachmentDiagnostics(id, detailsRow, button) {
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_fetch_attachment_diagnostics',
+                security: ACO_Media_Recovery_Settings.nonce,
+                id: id
+            },
+            success: function(res) {
+                if (res && res.success && res.data) {
+                    var data = res.data;
+                    var container = detailsRow.find('td');
+
+                    // Start rendering details
+                    var html = '<div class="acomr-diagnostic-report" style="background: #fafafa; border: 1px solid #c9cbce; border-radius: 6px; padding: 20px; font-family: inherit; color: #2c3338;">';
+                    
+                    // Header row
+                    html += '  <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e0e2e4; padding-bottom: 10px; margin-bottom: 15px;">';
+                    html += '    <h4 style="margin: 0; font-size: 15px; font-weight: 600; color: #1d2327;">Comprehensive Diagnostic Report: #' + data.info.id + '</h4>';
+                    html += '    <span style="font-size: 11px; color: #646970;">Checked: ' + new Date().toLocaleTimeString() + '</span>';
+                    html += '  </div>';
+
+                    // Grid Layout: Left Column (Prerequisites & Issues) / Right Column (Details & Metadata)
+                    html += '  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
+                    
+                    // Left Column
+                    html += '    <div>';
+                    // Prerequisites Checkbox list
+                    html += '      <h5 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 600; text-transform: uppercase; color: #646970; letter-spacing: 0.5px;">Offload Prerequisites</h5>';
+                    html += '      <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px;">';
+                    data.prereqs.forEach(function(p) {
+                        var pass = p.status === 'pass';
+                        var badge = pass ? '<span style="color: #46b450; font-weight: bold;">&#9989; PASS</span>' : '<span style="color: #dc3232; font-weight: bold;">&#10060; FAIL</span>';
+                        html += '        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #fff; border: 1px solid #dcdcde; border-radius: 4px;">';
+                        html += '          <span><strong>' + p.name + '</strong><br><small style="color: #646970;">' + p.desc + '</small></span>';
+                        html += '          <span>' + badge + '</span>';
+                        html += '        </div>';
+                    });
+                    html += '      </div>';
+
+                    // Issues and Fixes
+                    html += '      <h5 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 600; text-transform: uppercase; color: #646970; letter-spacing: 0.5px;">Detected Issues & Fixes</h5>';
+                    if (data.issues.length === 0) {
+                        html += '      <p style="color: #46b450; font-size: 13px;">No issues or prerequisites failures detected! This attachment is ready for offloading.</p>';
+                    } else {
+                        html += '      <div style="display: flex; flex-direction: column; gap: 10px;">';
+                        data.issues.forEach(function(iss) {
+                            var statusColor = '#dc3232'; // critical red
+                            var bg = '#fdf2f2';
+                            if (iss.severity === 'warning') {
+                                statusColor = '#ffb900';
+                                bg = '#fffdf6';
+                            } else if (iss.severity === 'info') {
+                                statusColor = '#007cba';
+                                bg = '#f0f6fc';
+                            }
+
+                            html += '        <div style="border-left: 4px solid ' + statusColor + '; background: ' + bg + '; padding: 12px; border-radius: 4px;">';
+                            html += '          <strong style="font-size: 13px; color: #1d2327;">' + iss.title + ' (' + iss.severity.toUpperCase() + ')</strong>';
+                            html += '          <p style="margin: 5px 0; font-size: 12.5px; color: #2c3338;">' + iss.desc + '</p>';
+                            html += '          <div style="font-size: 11.5px; margin-top: 8px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 6px;">';
+                            html += '            <strong>Fix:</strong> ' + iss.fix;
+                            html += '          </div>';
+                            html += '        </div>';
+                        });
+                        html += '      </div>';
+                    }
+                    html += '    </div>';
+
+                    // Right Column
+                    html += '    <div>';
+                    // Attachment Info table
+                    html += '      <h5 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 600; text-transform: uppercase; color: #646970; letter-spacing: 0.5px;">Attachment Details</h5>';
+                    html += '      <table style="width:100%; font-size: 12.5px; margin-bottom: 20px; border-collapse: collapse;">';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Title</td><td style="padding:6px 0;">' + escapeHtml(data.info.title) + '</td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">MIME Type</td><td style="padding:6px 0;">' + escapeHtml(data.info.mime) + '</td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Local Size</td><td style="padding:6px 0;">' + data.info.size + '</td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Upload Date</td><td style="padding:6px 0;">' + data.info.upload_date + '</td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Database File Key</td><td style="padding:6px 0;"><code>' + escapeHtml(data.info.filename) + '</code></td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Full Local Path</td><td style="padding:6px 0; word-break: break-all;"><code>' + escapeHtml(data.info.upload_path) + '</code></td></tr>';
+                    html += '      </table>';
+
+                    // Cloud Provider and object keys
+                    html += '      <h5 style="margin: 0 0 10px 0; font-size: 13px; font-weight: 600; text-transform: uppercase; color: #646970; letter-spacing: 0.5px;">Cloud Storage Resolution</h5>';
+                    html += '      <table style="width:100%; font-size: 12.5px; margin-bottom: 20px; border-collapse: collapse;">';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Provider / Bucket</td><td style="padding:6px 0;">' + (data.provider.provider ? '<strong>' + data.provider.provider.toUpperCase() + '</strong> (' + data.provider.bucket + ')' : '<span style="color:#d94f4f;">Not Configured</span>') + '</td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Generated Object Key</td><td style="padding:6px 0;"><code>' + (data.upload_key ? escapeHtml(data.upload_key) : 'N/A') + '</code></td></tr>';
+                    
+                    var rStatusBadge = '<span style="color:#646970; font-weight:bold;">UNAVAILABLE</span>';
+                    if (data.remote.status === 'exists') {
+                        rStatusBadge = '<span style="color:#46b450; font-weight:bold;">&#9989; FOUND ON CLOUD</span>';
+                    } else if (data.remote.status === 'missing') {
+                        rStatusBadge = '<span style="color:#dc3232; font-weight:bold;">&#10060; MISSING FROM CLOUD</span>';
+                    } else if (data.remote.status === 'error') {
+                        rStatusBadge = '<span style="color:#ffb900; font-weight:bold;">CHECK ERROR</span>';
+                    }
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Storage Bucket Check</td><td style="padding:6px 0;">' + rStatusBadge + '</td></tr>';
+
+                    var rewriteBadge = data.rewrite.status ? '<span style="color: #46b450; font-weight: bold;">ACTIVE (Rewritten)</span>' : '<span style="color: #646970;">INACTIVE (Local fallback)</span>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">URL Rewrite Status</td><td style="padding:6px 0;">' + rewriteBadge + '</td></tr>';
+                    html += '        <tr style="border-bottom: 1px solid #e0e2e4;"><td style="padding: 6px 0; font-weight:600; color:#50575e;">Resolved Public URL</td><td style="padding:6px 0; word-break: break-all;"><a href="' + data.rewrite.rewritten_url + '" target="_blank">' + escapeHtml(data.rewrite.rewritten_url) + '</a></td></tr>';
+                    html += '      </table>';
+                    html += '    </div>';
+                    html += '  </div>';
+
+                    // Collapsible Database Metadata Dump
+                    html += '  <div style="margin-top: 20px;">';
+                    html += '    <button type="button" class="acomr-btn acomr-btn-secondary btn-toggle-db-meta" style="font-size: 11px; padding: 4px 8px;">Show Database Metadata Dumps</button>';
+                    html += '    <div class="db-meta-dumps" style="display: none; margin-top: 10px; max-height: 250px; overflow-y: auto; background: #fff; border: 1px solid #dcdcde; border-radius: 4px; padding: 10px; font-size: 11px; font-family: monospace;">';
+                    html += '      <strong>_wp_attachment_metadata:</strong>';
+                    html += '      <pre style="margin: 5px 0 10px 0; white-space: pre-wrap; word-break: break-all;">' + JSON.stringify(data.metadata.attachment_metadata, null, 2) + '</pre>';
+                    html += '      <strong>acoofmp_sync_to_cloud_status:</strong>';
+                    html += '      <pre style="margin: 5px 0 0 0; white-space: pre-wrap; word-break: break-all;">' + JSON.stringify(data.metadata.offload_metadata, null, 2) + '</pre>';
+                    html += '    </div>';
+                    html += '  </div>';
+
+                    html += '</div>';
+
+                    container.html(html);
+
+                    // Add toggle handler for metadata dump
+                    detailsRow.find('.btn-toggle-db-meta').on('click', function() {
+                        var pre = detailsRow.find('.db-meta-dumps');
+                        pre.toggle();
+                        if (pre.is(':visible')) {
+                            $(this).text('Hide Database Metadata Dumps');
+                        } else {
+                            $(this).text('Show Database Metadata Dumps');
+                        }
+                    });
+
+                    button.text('Hide Details');
+                } else {
+                    detailsRow.find('td').html('<div class="acomr-details-error" style="color: #dc3232; padding: 10px; text-align: center;">Error: ' + (res.data && res.data.message ? res.data.message : 'Unknown error') + '</div>');
+                }
+            },
+            error: function() {
+                detailsRow.find('td').html('<div class="acomr-details-error" style="color: #dc3232; padding: 10px; text-align: center;">Failed to load diagnostic details from server.</div>');
+            },
+            complete: function() {
+                button.prop('disabled', false);
             }
         });
     }
