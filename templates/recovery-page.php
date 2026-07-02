@@ -413,4 +413,25 @@ $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
 
         <div class="acomr-console-box" id="acomr-console"></div>
     </div>
+
+    <!-- Export Progress Modal Overlay -->
+    <div id="acomr-export-modal" style="display: none; position: fixed; z-index: 999999; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.5); align-items: center; justify-content: center;">
+        <div style="background-color: #fff; padding: 30px; border: 1px solid #c9cbce; border-radius: 6px; width: 450px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-family: inherit;">
+            <h3 id="acomr-export-title" style="margin: 0 0 10px 0; font-size: 16px; font-weight: 600; color: #1d2327;"><?php _e( 'Exporting Diagnostics Log', 'aco-media-recovery' ); ?></h3>
+            <p id="acomr-export-stage" style="margin: 0 0 15px 0; font-size: 13px; color: #646970; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;"></p>
+            
+            <div style="background-color: #f0f0f1; border-radius: 4px; height: 20px; width: 100%; overflow: hidden; margin-bottom: 10px; border: 1px solid #dcdcde;">
+                <div id="acomr-export-bar" style="background-color: #2271b1; height: 100%; width: 0%; transition: width 0.1s ease; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 600;">0%</div>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <span id="acomr-export-status" style="font-size: 13px; color: #2c3338;"></span>
+                <span id="acomr-export-percent" style="font-size: 13px; font-weight: 600; color: #1d2327;">0%</span>
+            </div>
+
+            <div style="text-align: right;">
+                <button type="button" class="acomr-btn acomr-btn-secondary" id="btn-cancel-export" style="font-size: 12px; padding: 6px 12px;"><?php _e( 'Cancel Export', 'aco-media-recovery' ); ?></button>
+            </div>
+        </div>
+    </div>
 </div>
