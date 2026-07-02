@@ -2,7 +2,7 @@
 /*
 Plugin Name: Media Cloud Storage Debug & Recovery Tool
 Description: Standalone debugging & recovery tool to list and restore files from the cloud to the local server, compatible with Offload Media Cloud Storage Pro.
-Version: 1.0.0
+Version: 1.0.2
 Author: Acowebs
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 // Define Constants
-define( 'ACO_MEDIA_RECOVERY_VERSION', '1.0.0' );
+define( 'ACO_MEDIA_RECOVERY_VERSION', '1.0.2' );
 define( 'ACO_MEDIA_RECOVERY_PATH', plugin_dir_path( __FILE__ ) );
 define( 'ACO_MEDIA_RECOVERY_URL', plugin_dir_url( __FILE__ ) );
 define( 'ACO_MEDIA_RECOVERY_BASENAME', plugin_basename( __FILE__ ) );

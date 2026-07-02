@@ -9,7 +9,8 @@ jQuery(document).ready(function ($) {
         selected: [],
         items: [], // List of items on current page
         diagnostics_page: 1,
-        diagnostics_search: ''
+        diagnostics_search: '',
+        export_cancelled: false
     };
 
     // Ensure the AJAX URL scheme matches the current page protocol to prevent SSL/Redirect POST drops
@@ -225,10 +226,9 @@ jQuery(document).ready(function ($) {
         });
 
         // Export Diagnostics Issues Log
-        var isExportCancelled = false;
         $('#btn-export-diagnostics').on('click', function (e) {
             e.preventDefault();
-            isExportCancelled = false;
+            state.export_cancelled = false;
 
             // Show modal & set initial state
             var modal = $('#acomr-export-modal');
@@ -237,7 +237,7 @@ jQuery(document).ready(function ($) {
 
             // Cancel click handler
             $('#btn-cancel-export').off('click').on('click', function() {
-                isExportCancelled = true;
+                state.export_cancelled = true;
                 modal.hide();
             });
 
@@ -276,112 +276,6 @@ jQuery(document).ready(function ($) {
                 }
             });
         });
-
-        function processExportBatch(token, offset, limit, total) {
-            if (isExportCancelled) {
-                return;
-            }
-
-            var processed = Math.min(offset, total);
-            updateExportProgress(
-                'Processing...', 
-                'Analyzing attachments ' + (offset + 1) + ' to ' + Math.min(offset + limit, total) + ' of ' + total + '...', 
-                processed, 
-                total
-            );
-
-            $.ajax({
-                url: ACO_Media_Recovery_Settings.ajax_url,
-                method: 'POST',
-                data: {
-                    action: 'aco_media_recovery_export_batch',
-                    security: ACO_Media_Recovery_Settings.nonce,
-                    token: token,
-                    offset: offset,
-                    limit: limit,
-                    search: state.diagnostics_search
-                },
-                success: function(res) {
-                    if (isExportCancelled) return;
-
-                    if (res && res.success && res.data) {
-                        var nextOffset = offset + limit;
-                        if (nextOffset >= total) {
-                            // Finalize
-                            finalizeExport(token, total);
-                        } else {
-                            // Next batch
-                            processExportBatch(token, nextOffset, limit, total);
-                        }
-                    } else {
-                        var errMsg = (res && res.data && res.data.message) ? res.data.message : 'Unknown error during batch processing.';
-                        alert('Export failed during batch: ' + errMsg);
-                        $('#acomr-export-modal').hide();
-                    }
-                },
-                error: function() {
-                    if (isExportCancelled) return;
-                    alert('Export failed during batch request.');
-                    $('#acomr-export-modal').hide();
-                }
-            });
-        }
-
-        function finalizeExport(token, total) {
-            updateExportProgress('Finalizing...', 'Compiling report and building stats...', total, total);
-
-            $.ajax({
-                url: ACO_Media_Recovery_Settings.ajax_url,
-                method: 'POST',
-                data: {
-                    action: 'aco_media_recovery_export_finalize',
-                    security: ACO_Media_Recovery_Settings.nonce,
-                    token: token,
-                    search: state.diagnostics_search
-                },
-                success: function(res) {
-                    if (isExportCancelled) return;
-
-                    if (res && res.success) {
-                        updateExportProgress('Complete!', 'Triggering file download...', total, total);
-                        
-                        // Wait briefly for user to see 100% complete state, then download
-                        setTimeout(function() {
-                            $('#acomr-export-modal').hide();
-                            
-                            // Redirect to download
-                            var downloadUrl = ACO_Media_Recovery_Settings.ajax_url + 
-                                              '?action=aco_media_recovery_export_download' +
-                                              '&security=' + encodeURIComponent(ACO_Media_Recovery_Settings.nonce) +
-                                              '&token=' + encodeURIComponent(token);
-                            window.location.href = downloadUrl;
-                        }, 800);
-                    } else {
-                        var errMsg = (res && res.data && res.data.message) ? res.data.message : 'Unknown error during finalization.';
-                        alert('Export failed during finalization: ' + errMsg);
-                        $('#acomr-export-modal').hide();
-                    }
-                },
-                error: function() {
-                    if (isExportCancelled) return;
-                    alert('Export failed during finalization request.');
-                    $('#acomr-export-modal').hide();
-                }
-            });
-        }
-
-        function updateExportProgress(stage, statusMsg, processed, total) {
-            $('#acomr-export-stage').text(stage);
-            $('#acomr-export-status').text(statusMsg);
-            
-            var percentage = 0;
-            if (total > 0) {
-                percentage = Math.round((processed / total) * 100);
-            }
-            
-            $('#acomr-export-bar').css('width', percentage + '%').text(percentage + '%');
-            $('#acomr-export-percent').text(percentage + '%');
-        }
 
         // Diagnostics search input
         var diagSearchTimeout = null;
@@ -1161,14 +1055,113 @@ jQuery(document).ready(function ($) {
     }
 
     /**
-     * Simple HTML Escaper for console outputs.
+     * Process diagnostics export in batches.
      */
-    function escapeHtml(text) {
-        return text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+    function processExportBatch(token, offset, limit, total) {
+        if (state.export_cancelled) {
+            return;
+        }
+
+        var processed = Math.min(offset, total);
+        updateExportProgress(
+            'Processing...', 
+            'Analyzing attachments ' + (offset + 1) + ' to ' + Math.min(offset + limit, total) + ' of ' + total + '...', 
+            processed, 
+            total
+        );
+
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_export_batch',
+                security: ACO_Media_Recovery_Settings.nonce,
+                token: token,
+                offset: offset,
+                limit: limit,
+                search: state.diagnostics_search
+            },
+            success: function(res) {
+                if (state.export_cancelled) return;
+
+                if (res && res.success && res.data) {
+                    var nextOffset = offset + limit;
+                    if (nextOffset >= total) {
+                        finalizeExport(token, total);
+                    } else {
+                        processExportBatch(token, nextOffset, limit, total);
+                    }
+                } else {
+                    var errMsg = (res && res.data && res.data.message) ? res.data.message : 'Unknown error during batch processing.';
+                    alert('Export failed during batch: ' + errMsg);
+                    $('#acomr-export-modal').hide();
+                }
+            },
+            error: function() {
+                if (state.export_cancelled) return;
+                alert('Export failed during batch request.');
+                $('#acomr-export-modal').hide();
+            }
+        });
+    }
+
+    /**
+     * Finalize the batch export session.
+     */
+    function finalizeExport(token, total) {
+        updateExportProgress('Finalizing...', 'Compiling report and building stats...', total, total);
+
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_export_finalize',
+                security: ACO_Media_Recovery_Settings.nonce,
+                token: token,
+                search: state.diagnostics_search
+            },
+            success: function(res) {
+                if (state.export_cancelled) return;
+
+                if (res && res.success) {
+                    updateExportProgress('Complete!', 'Triggering file download...', total, total);
+                    
+                    setTimeout(function() {
+                        $('#acomr-export-modal').hide();
+                        
+                        var downloadUrl = ACO_Media_Recovery_Settings.ajax_url + 
+                                          '?action=aco_media_recovery_export_download' +
+                                          '&security=' + encodeURIComponent(ACO_Media_Recovery_Settings.nonce) +
+                                          '&token=' + encodeURIComponent(token);
+                        window.location.href = downloadUrl;
+                    }, 800);
+                } else {
+                    var errMsg = (res && res.data && res.data.message) ? res.data.message : 'Unknown error during finalization.';
+                    alert('Export failed during finalization: ' + errMsg);
+                    $('#acomr-export-modal').hide();
+                }
+            },
+            error: function() {
+                if (state.export_cancelled) return;
+                alert('Export failed during finalization request.');
+                $('#acomr-export-modal').hide();
+            }
+        });
+    }
+
+    /**
+     * Update progress indicators inside the export progress modal.
+     */
+    function updateExportProgress(stage, statusMsg, processed, total) {
+        $('#acomr-export-stage').text(stage);
+        $('#acomr-export-status').text(statusMsg);
+        
+        var percentage = 0;
+        if (total > 0) {
+            percentage = Math.round((processed / total) * 100);
+        }
+        
+        $('#acomr-export-bar').css('width', percentage + '%').text(percentage + '%');
+        $('#acomr-export-percent').text(percentage + '%');
     }
 });
