@@ -1164,4 +1164,16 @@ jQuery(document).ready(function ($) {
         $('#acomr-export-bar').css('width', percentage + '%').text(percentage + '%');
         $('#acomr-export-percent').text(percentage + '%');
     }
+
+    /**
+     * Simple HTML Escaper for console outputs.
+     */
+    function escapeHtml(text) {
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
 });
