@@ -224,6 +224,16 @@ jQuery(document).ready(function ($) {
             loadDiagnosticsList();
         });
 
+        // Export Diagnostics Issues Log
+        $('#btn-export-diagnostics').on('click', function (e) {
+            e.preventDefault();
+            var url = ACO_Media_Recovery_Settings.ajax_url + 
+                      '?action=aco_media_recovery_export_not_offloaded' +
+                      '&security=' + encodeURIComponent(ACO_Media_Recovery_Settings.nonce) +
+                      '&search=' + encodeURIComponent(state.diagnostics_search);
+            window.location.href = url;
+        });
+
         // Diagnostics search input
         var diagSearchTimeout = null;
         $('#diagnostics-search').on('keyup', function() {

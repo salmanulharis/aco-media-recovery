@@ -14,6 +14,7 @@ class ACO_Media_Recovery_Ajax {
         add_action( 'wp_ajax_aco_media_recovery_run_health_checks', [ __CLASS__, 'run_health_checks' ] );
         add_action( 'wp_ajax_aco_media_recovery_fetch_not_offloaded', [ __CLASS__, 'fetch_not_offloaded' ] );
         add_action( 'wp_ajax_aco_media_recovery_fetch_attachment_diagnostics', [ __CLASS__, 'fetch_attachment_diagnostics' ] );
+        add_action( 'wp_ajax_aco_media_recovery_export_not_offloaded', [ __CLASS__, 'export_not_offloaded' ] );
     }
 
     /**
@@ -1356,6 +1357,220 @@ class ACO_Media_Recovery_Ajax {
             'pages'       => ceil( $total_count / $per_page ),
             'current'     => $page,
         ] );
+    }
+
+    /**
+     * Export all non-offloaded attachments matching the search query to a structured text file.
+     */
+    public static function export_not_offloaded() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( __( 'Unauthorized access.', 'aco-media-recovery' ), 403 );
+        }
+
+        global $wpdb;
+
+        $search = isset( $_GET['search'] ) ? sanitize_text_field( $_GET['search'] ) : '';
+
+        $uploads  = wp_get_upload_dir();
+        $basedir  = $uploads['basedir'];
+
+        // S3/GCS provider configuration status
+        $provider_active = false;
+        $provider_name = 'None';
+        $bucket_name = 'N/A';
+        if ( class_exists( 'ACOOFMP_Settings_Helper' ) ) {
+            $s = ACOOFMP_Settings_Helper::get_provider_settings();
+            if ( ! empty( $s ) && ! empty( $s['provider'] ) ) {
+                $provider_active = true;
+                $provider_name = strtoupper( $s['provider'] );
+                $bucket_name = $s['bucket'] ?? 'N/A';
+            }
+        }
+
+        // Build SQL to fetch attachments NOT offloaded
+        $where = [ "p.post_type = 'attachment'", "p.post_status != 'trash'" ];
+        $params = [];
+
+        // Left join status meta and check for NOT LIKE or NULL
+        $where[] = "(pm_status.meta_value IS NULL OR pm_status.meta_value NOT LIKE '%\"status\";s:9:\"offloaded\"%')";
+
+        if ( ! empty( $search ) ) {
+            $where[] = "(p.post_title LIKE %s OR pm_file.meta_value LIKE %s OR p.ID = %d)";
+            $search_like = '%' . $wpdb->esc_like( $search ) . '%';
+            $params[] = $search_like;
+            $params[] = $search_like;
+            $params[] = intval( $search );
+        }
+
+        $where_sql = 'WHERE ' . implode( ' AND ', $where );
+
+        $query = "
+            SELECT p.ID, p.post_title, p.post_mime_type, pm_file.meta_value as filepath, p.post_date
+            FROM {$wpdb->posts} p
+            LEFT JOIN {$wpdb->postmeta} pm_status ON p.ID = pm_status.post_id AND pm_status.meta_key = 'acoofmp_sync_to_cloud_status'
+            LEFT JOIN {$wpdb->postmeta} pm_file ON p.ID = pm_file.post_id AND pm_file.meta_key = '_wp_attached_file'
+            {$where_sql}
+            ORDER BY p.ID DESC
+        ";
+        
+        $sql = $params ? $wpdb->prepare( $query, ...$params ) : $query;
+        $results = $wpdb->get_results( $sql );
+
+        $stats = [
+            'critical' => 0,
+            'warning'  => 0,
+            'info'     => 0,
+            'total'    => count( $results ),
+        ];
+
+        $details = [];
+
+        foreach ( $results as $row ) {
+            $id = (int) $row->ID;
+            $filepath = $row->filepath;
+            $mime = $row->post_mime_type;
+            $date = $row->post_date;
+
+            // Run issue checks
+            $issue = __( 'Offload metadata missing (Pending Offload)', 'aco-media-recovery' );
+            $severity = 'info';
+            $fix = __( 'Trigger the manual sync option in media library, or execute Offload in the debugger.', 'aco-media-recovery' );
+
+            $local_path = ! empty( $filepath ) ? $basedir . '/' . ltrim( $filepath, '/' ) : '';
+            $exists_locally = ! empty( $local_path ) && file_exists( $local_path );
+            $readable = $exists_locally && is_readable( $local_path );
+            
+            $meta = wp_get_attachment_metadata( $id );
+            $meta_valid = ! empty( $meta ) && is_array( $meta );
+
+            // 1. Invalid path
+            if ( empty( $filepath ) ) {
+                $issue = __( 'Attachment exists but file path is invalid', 'aco-media-recovery' );
+                $severity = 'critical';
+                $fix = __( 'Check attachment database entry or recreate the attachment.', 'aco-media-recovery' );
+            } else {
+                // 2. Local file missing
+                if ( ! $exists_locally ) {
+                    $issue = __( 'Local file missing', 'aco-media-recovery' );
+                    $severity = 'critical';
+                    $fix = __( 'Upload the file to the server uploads path manually, or restore from a backup.', 'aco-media-recovery' );
+                } else {
+                    // Check readability
+                    if ( ! $readable ) {
+                        $issue = __( 'File Read Permission Error', 'aco-media-recovery' );
+                        $severity = 'critical';
+                        $fix = __( 'Change file permissions to 644 or correct owner settings.', 'aco-media-recovery' );
+                    } else {
+                        // 3. Corrupt/missing metadata
+                        if ( ! $meta_valid ) {
+                            $issue = __( 'Missing or corrupted attachment metadata', 'aco-media-recovery' );
+                            $severity = 'warning';
+                            $fix = __( 'Regenerate thumbnails/metadata using plugins like Regenerate Thumbnails.', 'aco-media-recovery' );
+                        } else {
+                            // 4. Unsupported file type
+                            $ext = pathinfo( $filepath, PATHINFO_EXTENSION );
+                            if ( empty( $ext ) || empty( $mime ) ) {
+                                $issue = __( 'Unsupported file type', 'aco-media-recovery' );
+                                $severity = 'warning';
+                                $fix = __( 'Check file extension and MIME type registration on the server.', 'aco-media-recovery' );
+                            } elseif ( ! $provider_active ) {
+                                // 5. Credentials issue
+                                $issue = __( 'Storage credentials or permissions issue', 'aco-media-recovery' );
+                                $severity = 'warning';
+                                $fix = __( 'Go to Offload settings, complete setup, and save options.', 'aco-media-recovery' );
+                            }
+                        }
+                    }
+                }
+            }
+
+            $stats[$severity]++;
+
+            $size_formatted = $exists_locally ? size_format( filesize( $local_path ) ) : 'N/A';
+
+            $details[] = [
+                'id'       => $id,
+                'title'    => $row->post_title,
+                'filename' => $filepath ? $filepath : 'Unknown filename',
+                'path'     => $local_path ? $local_path : 'N/A',
+                'mime'     => $mime ? $mime : 'N/A',
+                'date'     => $date,
+                'size'     => $size_formatted,
+                'issue'    => $issue,
+                'severity' => strtoupper( $severity ),
+                'fix'      => $fix,
+                'checks'   => [
+                    'local_exists' => $exists_locally ? 'Yes' : 'No',
+                    'readable'     => $exists_locally ? ( $readable ? 'Yes' : 'No' ) : 'N/A',
+                    'meta_valid'   => $meta_valid ? 'Yes' : 'No',
+                ]
+            ];
+        }
+
+        // Generate text report
+        $output = "======================================================================\n";
+        $output .= "         NON-OFFLOADED ATTACHMENTS DIAGNOSTIC REPORT\n";
+        $output .= "======================================================================\n";
+        $output .= "Generated on:            " . date( 'Y-m-d H:i:s' ) . "\n";
+        $output .= "Site URL:                " . site_url() . "\n";
+        $output .= "Active Cloud Provider:   " . $provider_name . "\n";
+        $output .= "Target Bucket:           " . $bucket_name . "\n";
+        $output .= "Total Non-Offloaded:     " . $stats['total'] . "\n";
+        if ( ! empty( $search ) ) {
+            $output .= "Search Filter:           \"" . $search . "\"\n";
+        }
+        $output .= "----------------------------------------------------------------------\n";
+        $output .= "This report contains a list of media library attachments that are not\n";
+        $output .= "yet offloaded to cloud storage, along with the probable reasons and\n";
+        $output .= "suggested troubleshooting steps.\n";
+        $output .= "======================================================================\n\n";
+
+        $output .= "SUMMARY OF DETECTED ISSUES\n";
+        $output .= "----------------------------------------------------------------------\n";
+        $output .= sprintf( "[CRITICAL] %d occurrences\n", $stats['critical'] );
+        $output .= sprintf( "[WARNING]  %d occurrences\n", $stats['warning'] );
+        $output .= sprintf( "[INFO]     %d occurrences\n", $stats['info'] );
+        $output .= "======================================================================\n\n";
+
+        $output .= "DETAILED ATTACHMENT REPORT\n";
+        $output .= "======================================================================\n";
+
+        if ( empty( $details ) ) {
+            $output .= "\nNo non-offloaded attachments found.\n";
+        } else {
+            foreach ( $details as $index => $item ) {
+                $num = $index + 1;
+                $output .= "\n[$num] Attachment ID: #" . $item['id'] . "\n";
+                $output .= "----------------------------------------------------------------------\n";
+                $output .= "  Title:                 " . $item['title'] . "\n";
+                $output .= "  File Name:             " . $item['filename'] . "\n";
+                $output .= "  Full Local Path:       " . $item['path'] . "\n";
+                $output .= "  MIME Type:             " . $item['mime'] . "\n";
+                $output .= "  Upload Date:           " . $item['date'] . "\n";
+                $output .= "  Local File Size:       " . $item['size'] . "\n";
+                $output .= "\n";
+                $output .= "  Status Checks:\n";
+                $output .= "  - Local File Exists:   " . $item['checks']['local_exists'] . "\n";
+                $output .= "  - File Readable:       " . $item['checks']['readable'] . "\n";
+                $output .= "  - Metadata Valid:      " . $item['checks']['meta_valid'] . "\n";
+                $output .= "\n";
+                $output .= "  Detected Issue:        " . $item['issue'] . "\n";
+                $output .= "  Severity:              " . $item['severity'] . "\n";
+                $output .= "  Suggested Resolution:  " . $item['fix'] . "\n";
+                $output .= "----------------------------------------------------------------------\n";
+            }
+        }
+
+        // Send download headers
+        header( 'Content-Type: text/plain; charset=utf-8' );
+        header( 'Content-Disposition: attachment; filename="non-offloaded-attachments-diagnostics-' . date( 'Ymd-His' ) . '.txt"' );
+        header( 'Pragma: no-cache' );
+        header( 'Expires: 0' );
+
+        echo $output;
+        exit;
     }
 
     /**

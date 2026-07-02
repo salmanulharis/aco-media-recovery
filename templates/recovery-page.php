@@ -361,10 +361,15 @@ $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
                 </div>
                 <p class="acomr-description" style="margin-bottom: 15px;"><?php _e( 'Lists all attachments that are currently not offloaded to cloud storage, highlighting the most probable root cause.', 'aco-media-recovery' ); ?></p>
                 
-                <div class="acomr-table-actions" style="margin-bottom: 15px;">
+                <div class="acomr-table-actions" style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
                     <div class="acomr-actions-left" style="display: flex; gap: 8px; align-items: center;">
                         <input type="text" id="diagnostics-search" placeholder="<?php _e( 'Search by filename or ID...', 'aco-media-recovery' ); ?>" style="padding: 6px 10px; font-size: 13px; border: 1px solid #8c8f94; border-radius: 4px; width: 250px;">
                         <button class="acomr-btn acomr-btn-secondary acomr-btn-icon" id="btn-refresh-diagnostics" title="<?php _e( 'Refresh list', 'aco-media-recovery' ); ?>">&#8635;</button>
+                    </div>
+                    <div class="acomr-actions-right">
+                        <button class="acomr-btn acomr-btn-secondary" id="btn-export-diagnostics" title="<?php _e( 'Export all non-offloaded attachments with issues', 'aco-media-recovery' ); ?>">
+                            <?php _e( 'Export Issues Log', 'aco-media-recovery' ); ?>
+                        </button>
                     </div>
                 </div>
 
