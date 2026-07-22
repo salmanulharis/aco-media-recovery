@@ -66,9 +66,20 @@ class ACO_Media_Recovery_Admin {
                 'ajax_url'      => admin_url( 'admin-ajax.php' ),
                 'nonce'         => wp_create_nonce( 'aco_media_recovery_nonce' ),
                 'is_pro_active' => class_exists( 'ACOOFMP_Transfer_Service' ) ? 1 : 0,
+                'acl_available' => (int) ( ACO_Media_Recovery_ACL_Updater::get_feature_status()['available'] ?? false ),
                 'labels'        => [
                     'confirm_bulk' => __( 'Are you sure you want to recover the selected items?', 'aco-media-recovery' ),
                     'no_selection' => __( 'Please select at least one item to recover.', 'aco-media-recovery' ),
+                    'acl_confirm_title'         => __( 'Confirm ACL Update', 'aco-media-recovery' ),
+                    'acl_confirm_public_title'  => __( 'Confirm Public ACL Update', 'aco-media-recovery' ),
+                    'acl_confirm_private_title' => __( 'Confirm Private ACL Update', 'aco-media-recovery' ),
+                    'acl_confirm_public_desc'   => __( 'This tool will scan all offloaded media and update each cloud object\'s ACL to public-read.', 'aco-media-recovery' ),
+                    'acl_confirm_private_desc'  => __( 'This tool will scan all offloaded media and update each cloud object\'s ACL to private.', 'aco-media-recovery' ),
+                    'acl_skip_public'           => __( 'Objects that are already public will be skipped automatically.', 'aco-media-recovery' ),
+                    'acl_skip_private'          => __( 'Objects that are already private will be skipped automatically.', 'aco-media-recovery' ),
+                    'acl_running'       => __( 'Updating object ACLs...', 'aco-media-recovery' ),
+                    'acl_complete'      => __( 'ACL update batch finished.', 'aco-media-recovery' ),
+                    'acl_no_failures'   => __( 'No failed items to retry.', 'aco-media-recovery' ),
                 ]
             ]
         );

@@ -18,6 +18,9 @@ class ACO_Media_Recovery_Ajax {
         add_action( 'wp_ajax_aco_media_recovery_export_batch', [ __CLASS__, 'export_batch' ] );
         add_action( 'wp_ajax_aco_media_recovery_export_finalize', [ __CLASS__, 'export_finalize' ] );
         add_action( 'wp_ajax_aco_media_recovery_export_download', [ __CLASS__, 'export_download' ] );
+        add_action( 'wp_ajax_aco_media_recovery_acl_status', [ __CLASS__, 'acl_status' ] );
+        add_action( 'wp_ajax_aco_media_recovery_acl_batch', [ __CLASS__, 'acl_batch' ] );
+        add_action( 'wp_ajax_aco_media_recovery_acl_clear_failures', [ __CLASS__, 'acl_clear_failures' ] );
     }
 
     /**
@@ -267,17 +270,23 @@ class ACO_Media_Recovery_Ajax {
                             }
                         }
                     } elseif ( $method === 'offload' ) {
-                        if ( ! class_exists( 'ACOOFMP_Delete_From_Server_API' ) ) {
+                        if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
                             $details = __( 'Error: Offload Pro plugin is not active.', 'aco-media-recovery' );
                         } else {
-                            // Use the Offload Pro pipeline: downloads original + all thumbnails
-                            // and removes the acoofmp_delete_from_server_status meta automatically.
-                            add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
-                            $downloaded_count = ACOOFMP_Delete_From_Server_API::acoofmp_download_attachments_to_server( [ $id ] );
-                            if ( $downloaded_count > 0 && file_exists( $local_path ) ) {
+                            $dl_result = self::download_attachment_from_cloud( $id, $local_path );
+                            if ( ! empty( $dl_result['original'] ) ) {
                                 $original_recovered = true;
+                                if ( ! empty( $dl_result['key_used'] ) ) {
+                                    $details = sprintf(
+                                        /* translators: %s: cloud object key */
+                                        __( 'Downloaded via key: %s', 'aco-media-recovery' ),
+                                        $dl_result['key_used']
+                                    );
+                                }
                             } else {
-                                $details = __( 'Offload Pro SDK download failed. Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
+                                $details = ! empty( $dl_result['error'] )
+                                    ? $dl_result['error']
+                                    : __( 'Offload Pro SDK download failed. Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
                             }
                         }
                     }
@@ -349,12 +358,11 @@ class ACO_Media_Recovery_Ajax {
                                     $thumb_error = $tmp_thumb->get_error_message();
                                 }
                             } elseif ( $method === 'offload' ) {
-                                // The Offload Pro pipeline already downloaded all thumbnails
-                                // via acoofmp_download_attachments_to_server above.
-                                // Just verify the file landed on disk.
-                                $thumb_restored = file_exists( $thumb_local );
-                                if ( ! $thumb_restored ) {
-                                    $thumb_error = __( 'Not found on disk after SDK download.', 'aco-media-recovery' );
+                                $status_thumb = self::download_cloud_file_by_key( '', $thumb_local, $id );
+                                if ( ! is_wp_error( $status_thumb ) ) {
+                                    $thumb_restored = true;
+                                } else {
+                                    $thumb_error = $status_thumb->get_error_message();
                                 }
                             }
 
@@ -508,24 +516,22 @@ class ACO_Media_Recovery_Ajax {
                         } elseif ( $dry_run ) {
                             $download_success = true;
                         } else {
-                            // Resolve attachment ID to use the full pipeline when possible.
-                            add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
                             $attachment_id_for_dl = self::get_attachment_id_by_path( $db_relative_path );
                             if ( $attachment_id_for_dl ) {
-                                $downloaded_count = ACOOFMP_Delete_From_Server_API::acoofmp_download_attachments_to_server( [ $attachment_id_for_dl ] );
-                                if ( $downloaded_count > 0 && file_exists( $local_path ) ) {
+                                $dl_result = self::download_attachment_from_cloud( $attachment_id_for_dl, $local_path );
+                                if ( ! empty( $dl_result['original'] ) ) {
                                     $download_success = true;
                                 } else {
-                                    $error_reason = __( 'Private cloud storage download failed via Offload SDK. Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
+                                    $error_reason = ! empty( $dl_result['error'] )
+                                        ? $dl_result['error']
+                                        : __( 'Private cloud storage download failed via Offload SDK. Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
                                 }
                             } else {
-                                // No attachment ID — fall back to direct file-path download.
-                                $attachment_files_dl = [ 0 => [ 'original_file' => $local_path ] ];
-                                $result_dl = ACOOFMP_Delete_From_Server_API::acoofmp_download_attachement_files_from_cloud( $attachment_files_dl, '' );
-                                if ( ! empty( $result_dl ) && file_exists( $local_path ) ) {
-                                    $download_success = true;
+                                $status = self::download_cloud_file_by_key( '', $local_path );
+                                if ( is_wp_error( $status ) ) {
+                                    $error_reason = $status->get_error_message();
                                 } else {
-                                    $error_reason = __( 'Private cloud storage download failed (attachment ID not found in database). Verify the bucket/credentials in the Offload plugin settings.', 'aco-media-recovery' );
+                                    $download_success = true;
                                 }
                             }
                         }
@@ -554,7 +560,7 @@ class ACO_Media_Recovery_Ajax {
                     } elseif ( $dry_run ) {
                         $download_success = true;
                     } else {
-                        $status = self::download_cloud_file_by_key( $key, $local_path );
+                        $status = self::download_cloud_file_by_key( $key, $local_path, self::get_attachment_id_by_path( $db_relative_path ) );
                         if ( is_wp_error( $status ) ) {
                             $error_reason = $status->get_error_message();
                         } else {
@@ -603,7 +609,7 @@ class ACO_Media_Recovery_Ajax {
                                 if ( ! empty( $key ) && $method === 'offload' ) {
                                     $thumb_key = ( dirname( $key ) === '.' || dirname( $key ) === '/' ) ? $thumb_file : dirname( $key ) . '/' . $thumb_file;
                                     $thumb_key = str_replace( '\\', '/', $thumb_key );
-                                    $status_thumb = self::download_cloud_file_by_key( $thumb_key, $thumb_local );
+                                    $status_thumb = self::download_cloud_file_by_key( $thumb_key, $thumb_local, (int) $attachment_id );
                                     if ( is_wp_error( $status_thumb ) ) {
                                         $thumb_error = $status_thumb->get_error_message();
                                     } else {
@@ -623,11 +629,11 @@ class ACO_Media_Recovery_Ajax {
                                     }
                                 } elseif ( $method === 'offload' ) {
                                     if ( class_exists( 'ACOOFMP_Transfer_Service' ) ) {
-                                        $res_thumb = ACOOFMP_Transfer_Service::download( [ $thumb_local ] );
-                                        if ( is_array( $res_thumb ) && in_array( 0, $res_thumb['downloaded_keys'] ) && file_exists( $thumb_local ) ) {
+                                        $status_thumb = self::download_cloud_file_by_key( '', $thumb_local, (int) $attachment_id );
+                                        if ( ! is_wp_error( $status_thumb ) ) {
                                             $thumb_restored = true;
                                         } else {
-                                            $thumb_error = __( "S3 download failed.", 'aco-media-recovery' );
+                                            $thumb_error = $status_thumb->get_error_message();
                                         }
                                     }
                                 }
@@ -659,21 +665,108 @@ class ACO_Media_Recovery_Ajax {
     }
 
     /**
-     * Downloads a file from cloud storage using its exact key and saves it locally.
-     * Works for both Amazon S3 and Google Cloud Storage using active Pro credentials.
-     * 
-     * @param string $cloud_key   The S3/GCS object key (e.g., '2026/04/file.jpg').
-     * @param string $local_path  The absolute local filesystem path to save the file.
-     * @return bool|WP_Error      True on success, WP_Error object on failure.
+     * Download an attachment original file from cloud with key fallback resolution.
+     *
+     * @return array{original:bool,key_used:string,error:string}
      */
-    private static function download_cloud_file_by_key( $cloud_key, $local_path ) {
+    private static function download_attachment_from_cloud( $attachment_id, $local_path ) {
+        $result = [
+            'original' => false,
+            'key_used' => '',
+            'error'    => '',
+        ];
+
+        if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
+            $result['error'] = __( 'Offload Media Cloud Storage Pro plugin is not active.', 'aco-media-recovery' );
+            return $result;
+        }
+
+        wp_mkdir_p( dirname( $local_path ) );
+
+        $download = self::download_cloud_file_by_key( '', $local_path, (int) $attachment_id );
+        if ( is_wp_error( $download ) ) {
+            $result['error'] = $download->get_error_message();
+            return $result;
+        }
+
+        if ( file_exists( $local_path ) ) {
+            $result['original'] = true;
+            delete_post_meta( (int) $attachment_id, 'acoofmp_delete_from_server_status' );
+        }
+
+        return $result;
+    }
+
+    /**
+     * Downloads a file from cloud storage, trying multiple key candidates on NoSuchKey.
+     *
+     * @param string $cloud_key     Preferred S3/GCS object key (optional).
+     * @param string $local_path    Absolute local filesystem path.
+     * @param int    $attachment_id Optional attachment ID for historical prefix metadata.
+     * @return bool|WP_Error
+     */
+    private static function download_cloud_file_by_key( $cloud_key, $local_path, $attachment_id = 0 ) {
         if ( ! class_exists( 'ACOOFMP_Transfer_Service' ) ) {
             return new WP_Error( 'class_missing', __( 'Offload Media Cloud Storage Pro plugin is not active.', 'aco-media-recovery' ) );
         }
 
-        // 1. Temporarily hook a filter to force our custom key for the specific local path
+        $candidates = ACO_Media_Recovery_Cloud_Key_Resolver::get_key_candidates(
+            $local_path,
+            (int) $attachment_id,
+            (string) $cloud_key
+        );
+
+        if ( empty( $candidates ) ) {
+            return new WP_Error(
+                'no_keys',
+                __( 'No cloud object keys could be resolved for this file.', 'aco-media-recovery' )
+            );
+        }
+
+        $existing = ACO_Media_Recovery_Cloud_Key_Resolver::find_existing_key( $candidates );
+        if ( $existing ) {
+            $candidates = array_values( array_unique( array_merge( [ $existing ], $candidates ) ) );
+        }
+
+        wp_mkdir_p( dirname( $local_path ) );
+
+        $last_error = '';
+        foreach ( $candidates as $candidate_key ) {
+            $attempt = self::download_cloud_file_by_exact_key( $candidate_key, $local_path );
+            if ( true === $attempt && file_exists( $local_path ) ) {
+                return true;
+            }
+
+            if ( is_wp_error( $attempt ) ) {
+                $last_error = $attempt->get_error_message();
+            }
+        }
+
+        $preview = implode( ', ', array_slice( $candidates, 0, 4 ) );
+        if ( count( $candidates ) > 4 ) {
+            $preview .= '…';
+        }
+
+        return new WP_Error(
+            'download_failed',
+            sprintf(
+                /* translators: 1: comma-separated key list, 2: last error message */
+                __( 'Object not found in bucket. Tried keys: %1$s. %2$s', 'aco-media-recovery' ),
+                $preview,
+                $last_error ?: __( 'Verify bucket, credentials, and that the file was uploaded to the active provider.', 'aco-media-recovery' )
+            )
+        );
+    }
+
+    /**
+     * Download using one exact cloud key via the Offload Pro transfer service.
+     *
+     * @param string $cloud_key
+     * @param string $local_path
+     * @return bool|WP_Error
+     */
+    private static function download_cloud_file_by_exact_key( $cloud_key, $local_path ) {
         $override_key_filter = function( $generated_key, $file_path ) use ( $cloud_key, $local_path ) {
-            // Normalize slashes to ensure matching works on Windows and Linux
             if ( wp_normalize_path( $file_path ) === wp_normalize_path( $local_path ) ) {
                 return $cloud_key;
             }
@@ -681,25 +774,20 @@ class ACO_Media_Recovery_Ajax {
         };
 
         add_filter( 'acoofmp_generate_upload_key', $override_key_filter, 10, 2 );
-
-        // 2. Prevent path rewrites from interfering
         add_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
 
-        // 3. Trigger the Pro plugin's native credentials/download service
-        $result = ACOOFMP_Transfer_Service::download( array( $local_path ) );
+        $result = ACOOFMP_Transfer_Service::download( [ $local_path ] );
 
-        // 4. Remove the temporary filters
         remove_filter( 'acoofmp_generate_upload_key', $override_key_filter, 10 );
         remove_filter( 'acoofmp_skip_file_path_rewrite', '__return_true' );
 
-        // 5. Verify download status from transfer service results
-        if ( is_array( $result ) && in_array( 0, $result['downloaded_keys'] ) ) {
+        if ( is_array( $result ) && in_array( 0, $result['downloaded_keys'], true ) ) {
             return true;
         }
 
-        return new WP_Error( 
-            'download_failed', 
-            __( 'S3/GCS client failed to download the key. Verify that your cloud storage credentials are correct and that the key exists in your bucket.', 'aco-media-recovery' )
+        return new WP_Error(
+            'download_failed',
+            __( 'S3/GCS client failed to download the key.', 'aco-media-recovery' )
         );
     }
 
@@ -1997,6 +2085,96 @@ class ACO_Media_Recovery_Ajax {
             'prereqs' => $prereqs,
             'issues'  => $issues,
         ] );
+    }
+
+    /**
+     * Return ACL updater availability and summary stats.
+     */
+    public static function acl_status() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $status   = ACO_Media_Recovery_ACL_Updater::get_feature_status();
+        $failures = ACO_Media_Recovery_ACL_Updater::get_failures_for_display();
+
+        wp_send_json_success(
+            [
+                'status'   => $status,
+                'failures' => $failures,
+            ]
+        );
+    }
+
+    /**
+     * Process a batch of offloaded attachments for ACL updates.
+     */
+    public static function acl_batch() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        @set_time_limit( 0 );
+
+        $page         = isset( $_POST['page'] ) ? max( 1, intval( $_POST['page'] ) ) : 1;
+        $per_page     = isset( $_POST['per_page'] ) ? max( 1, min( 25, intval( $_POST['per_page'] ) ) ) : 5;
+        $retry_failed = isset( $_POST['retry_failed'] ) && $_POST['retry_failed'] === '1';
+        $acl_mode     = isset( $_POST['acl_mode'] ) ? sanitize_text_field( wp_unslash( $_POST['acl_mode'] ) ) : ACO_Media_Recovery_ACL_Updater::MODE_PUBLIC;
+        $acl_mode     = ACO_Media_Recovery_ACL_Updater::normalize_acl_mode( $acl_mode );
+
+        $query = ACO_Media_Recovery_ACL_Updater::get_offloaded_attachment_ids( $page, $per_page, $retry_failed );
+
+        if ( empty( $query['ids'] ) ) {
+            wp_send_json_success(
+                [
+                    'logs'               => [],
+                    'updated'            => 0,
+                    'skipped'            => 0,
+                    'failed'             => 0,
+                    'remaining_failures' => count( ACO_Media_Recovery_ACL_Updater::get_failures() ),
+                    'processed_ids'      => 0,
+                    'total'              => $query['total'],
+                    'is_completed'       => true,
+                ]
+            );
+        }
+
+        $result = ACO_Media_Recovery_ACL_Updater::process_batch( $query['ids'], $acl_mode, $retry_failed );
+
+        wp_send_json_success(
+            array_merge(
+                $result,
+                [
+                    'processed_ids' => count( $query['ids'] ),
+                    'total'         => $query['total'],
+                    'is_completed'  => ( $page * $per_page ) >= $query['total'],
+                    'current_page'  => $page,
+                ]
+            )
+        );
+    }
+
+    /**
+     * Clear stored ACL failure log.
+     */
+    public static function acl_clear_failures() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        ACO_Media_Recovery_ACL_Updater::clear_all_failures();
+
+        wp_send_json_success(
+            [
+                'message' => __( 'ACL failure log cleared.', 'aco-media-recovery' ),
+            ]
+        );
     }
 }
 

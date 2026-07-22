@@ -4,6 +4,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
+$acomr_acl_status = ACO_Media_Recovery_ACL_Updater::get_feature_status();
 ?>
 <div class="wrap acomr-recovery-container">
     <div class="acomr-header">
@@ -38,6 +39,7 @@ $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
             <button class="acomr-tab-btn" data-tab="tab-json"><?php _e( 'Manual JSON Import', 'aco-media-recovery' ); ?></button>
             <button class="acomr-tab-btn" data-tab="tab-settings"><?php _e( 'Settings', 'aco-media-recovery' ); ?></button>
             <button class="acomr-tab-btn" data-tab="tab-diagnostics"><?php _e( 'Diagnostics & Health', 'aco-media-recovery' ); ?></button>
+            <button class="acomr-tab-btn" data-tab="tab-acl" id="tab-acl-btn"><?php _e( 'ACL Update', 'aco-media-recovery' ); ?></button>
         </div>
 
         <!-- TAB 1: Database Scanning -->
@@ -393,6 +395,103 @@ $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
                 </div>
 
                 <div class="acomr-table-pagination" id="diagnostics-pagination" style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center;"></div>
+            </div>
+        </div>
+
+        <!-- TAB 5: ACL Update -->
+        <div class="acomr-tab-content" id="tab-acl">
+            <div class="acomr-acl-panel" id="acl-panel">
+                <div class="acomr-section-header" style="margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #1d2327;"><?php _e( 'Update Offloaded File Permissions', 'aco-media-recovery' ); ?></h3>
+                </div>
+
+                <p class="acomr-description" style="margin-bottom: 15px;">
+                    <?php _e( 'Change cloud object ACLs for already offloaded media — make files public-read or private without re-uploading. Only permission metadata on existing objects is updated.', 'aco-media-recovery' ); ?>
+                </p>
+
+                <div class="acomr-acl-status-banner <?php echo $acomr_acl_status['available'] ? 'acomr-acl-status-available' : 'acomr-acl-status-unavailable'; ?>" id="acl-status-banner">
+                    <?php if ( $acomr_acl_status['available'] ) : ?>
+                        <strong><?php _e( 'Ready', 'aco-media-recovery' ); ?></strong>
+                        <span>
+                            <?php
+                            printf(
+                                /* translators: 1: provider slug, 2: bucket name */
+                                esc_html__( 'Provider: %1$s · Bucket: %2$s', 'aco-media-recovery' ),
+                                esc_html( $acomr_acl_status['provider'] ),
+                                esc_html( $acomr_acl_status['bucket'] )
+                            );
+                            ?>
+                        </span>
+                    <?php else : ?>
+                        <strong><?php _e( 'Unavailable', 'aco-media-recovery' ); ?></strong>
+                        <span id="acl-unavailable-reason"><?php echo esc_html( $acomr_acl_status['reason'] ); ?></span>
+                    <?php endif; ?>
+                </div>
+
+                <div class="acomr-acl-stats-row">
+                    <div class="acomr-acl-stat">
+                        <span class="acomr-acl-stat-value" id="acl-stat-offloaded"><?php echo number_format_i18n( $acomr_acl_status['offloaded_count'] ); ?></span>
+                        <span class="acomr-acl-stat-label"><?php _e( 'Offloaded Attachments', 'aco-media-recovery' ); ?></span>
+                    </div>
+                    <div class="acomr-acl-stat">
+                        <span class="acomr-acl-stat-value" id="acl-stat-failed"><?php echo number_format_i18n( $acomr_acl_status['failed_count'] ); ?></span>
+                        <span class="acomr-acl-stat-label"><?php _e( 'Failed ACL Updates', 'aco-media-recovery' ); ?></span>
+                    </div>
+                </div>
+
+                <div class="acomr-acl-actions">
+                    <button class="acomr-btn acomr-btn-primary" id="btn-acl-make-public" <?php disabled( ! $acomr_acl_status['available'] ); ?>>
+                        <?php _e( 'Make Existing Files Public', 'aco-media-recovery' ); ?>
+                    </button>
+                    <button class="acomr-btn acomr-btn-secondary" id="btn-acl-make-private" <?php disabled( ! $acomr_acl_status['available'] ); ?>>
+                        <?php _e( 'Make Existing Files Private', 'aco-media-recovery' ); ?>
+                    </button>
+                    <button class="acomr-btn acomr-btn-secondary" id="btn-acl-retry-failed" <?php disabled( ! $acomr_acl_status['available'] || $acomr_acl_status['failed_count'] < 1 ); ?>>
+                        <?php _e( 'Retry Failed Items', 'aco-media-recovery' ); ?>
+                    </button>
+                    <button class="acomr-btn acomr-btn-secondary" id="btn-acl-clear-failures" <?php disabled( $acomr_acl_status['failed_count'] < 1 ); ?>>
+                        <?php _e( 'Clear Failure Log', 'aco-media-recovery' ); ?>
+                    </button>
+                </div>
+
+                <div class="acomr-acl-failures-wrap" id="acl-failures-wrap" <?php echo $acomr_acl_status['failed_count'] < 1 ? 'style="display:none;"' : ''; ?>>
+                    <h4><?php _e( 'Recent Failures', 'aco-media-recovery' ); ?></h4>
+                    <div class="acomr-table-container">
+                        <table class="acomr-media-table acomr-acl-failures-table">
+                            <thead>
+                                <tr>
+                                    <th width="80"><?php _e( 'Attachment', 'aco-media-recovery' ); ?></th>
+                                    <th width="90"><?php _e( 'Mode', 'aco-media-recovery' ); ?></th>
+                                    <th><?php _e( 'Object Key', 'aco-media-recovery' ); ?></th>
+                                    <th><?php _e( 'Error', 'aco-media-recovery' ); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody id="acl-failures-body">
+                                <tr>
+                                    <td colspan="4" class="acomr-table-placeholder"><?php _e( 'No failed ACL updates recorded.', 'aco-media-recovery' ); ?></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACL Confirmation Modal -->
+    <div id="acomr-acl-modal" class="acomr-modal-overlay" style="display: none;">
+        <div class="acomr-modal-card">
+            <h3 id="acl-modal-title"><?php _e( 'Confirm ACL Update', 'aco-media-recovery' ); ?></h3>
+            <p id="acl-modal-desc"><?php _e( 'This tool will scan all offloaded media and update each cloud object\'s ACL.', 'aco-media-recovery' ); ?></p>
+            <ul class="acomr-acl-confirm-list">
+                <li><?php _e( 'Only object permissions are changed — files are not re-uploaded or modified.', 'aco-media-recovery' ); ?></li>
+                <li id="acl-modal-skip-note"><?php _e( 'Objects that already match the target permission will be skipped automatically.', 'aco-media-recovery' ); ?></li>
+                <li><?php _e( 'Original files and all registered thumbnail sizes are included.', 'aco-media-recovery' ); ?></li>
+                <li><?php _e( 'Failed updates are logged and can be retried later.', 'aco-media-recovery' ); ?></li>
+            </ul>
+            <div class="acomr-modal-actions">
+                <button class="acomr-btn acomr-btn-secondary" id="btn-acl-cancel"><?php _e( 'Cancel', 'aco-media-recovery' ); ?></button>
+                <button class="acomr-btn acomr-btn-primary" id="btn-acl-confirm"><?php _e( 'Update ACLs', 'aco-media-recovery' ); ?></button>
             </div>
         </div>
     </div>

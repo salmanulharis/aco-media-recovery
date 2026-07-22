@@ -747,6 +747,126 @@ textarea#json_input:focus {
     padding: 0 !important;
 }
 
+/* Public ACL Update */
+.acomr-acl-status-banner {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 14px 16px;
+    border-radius: 4px;
+    margin-bottom: 18px;
+    border: 1px solid #dcdcde;
+    font-size: 13px;
+}
+
+.acomr-acl-status-available {
+    background: #edfaef;
+    border-left: 4px solid #46b450;
+}
+
+.acomr-acl-status-unavailable {
+    background: #fcf0f1;
+    border-left: 4px solid #dc3232;
+}
+
+.acomr-acl-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.acomr-acl-stat {
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+    padding: 14px;
+}
+
+.acomr-acl-stat-value {
+    display: block;
+    font-size: 24px;
+    font-weight: 600;
+    color: #1d2327;
+    line-height: 1.2;
+}
+
+.acomr-acl-stat-label {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #646970;
+}
+
+.acomr-acl-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.acomr-acl-failures-wrap h4 {
+    margin: 0 0 10px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.acomr-acl-confirm-list {
+    margin: 0 0 18px 18px;
+    color: #2c3338;
+    font-size: 13px;
+}
+
+.acomr-acl-confirm-list li {
+    margin-bottom: 6px;
+}
+
+.acomr-modal-overlay {
+    position: fixed;
+    z-index: 999999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.acomr-modal-card {
+    background: #fff;
+    padding: 28px;
+    border: 1px solid #c9cbce;
+    border-radius: 6px;
+    width: 520px;
+    max-width: calc(100% - 40px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.acomr-modal-card h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.acomr-modal-card p {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    color: #2c3338;
+}
+
+.acomr-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
 .btn-view-diagnostics {
     font-size: 11px !important;
     padding: 4px 8px !important;

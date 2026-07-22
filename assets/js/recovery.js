@@ -10,7 +10,10 @@ jQuery(document).ready(function ($) {
         items: [], // List of items on current page
         diagnostics_page: 1,
         diagnostics_search: '',
-        export_cancelled: false
+        export_cancelled: false,
+        acl_running: false,
+        acl_retry_mode: false,
+        acl_mode: 'public'
     };
 
     // Ensure the AJAX URL scheme matches the current page protocol to prevent SSL/Redirect POST drops
@@ -211,8 +214,106 @@ jQuery(document).ready(function ($) {
             var target = $(this).data('tab');
             if (target === 'tab-diagnostics') {
                 loadDiagnosticsList();
+            } else if (target === 'tab-acl') {
+                refreshAclStatus();
             }
         });
+
+        // ACL update tool
+        function openAclModal(mode) {
+            if (parseInt(ACO_Media_Recovery_Settings.acl_available, 10) !== 1) {
+                return;
+            }
+
+            state.acl_mode = mode === 'private' ? 'private' : 'public';
+            state.acl_retry_mode = false;
+
+            var labels = ACO_Media_Recovery_Settings.labels || {};
+            var isPublic = state.acl_mode === 'public';
+
+            $('#acl-modal-title').text(
+                isPublic
+                    ? (labels.acl_confirm_public_title || 'Confirm Public ACL Update')
+                    : (labels.acl_confirm_private_title || 'Confirm Private ACL Update')
+            );
+            $('#acl-modal-desc').text(
+                isPublic
+                    ? (labels.acl_confirm_public_desc || 'This tool will scan all offloaded media and update each cloud object\'s ACL to public-read.')
+                    : (labels.acl_confirm_private_desc || 'This tool will scan all offloaded media and update each cloud object\'s ACL to private.')
+            );
+            $('#acl-modal-skip-note').text(
+                isPublic
+                    ? (labels.acl_skip_public || 'Objects that are already public will be skipped automatically.')
+                    : (labels.acl_skip_private || 'Objects that are already private will be skipped automatically.')
+            );
+
+            $('#acomr-acl-modal').css('display', 'flex');
+        }
+
+        $('#btn-acl-make-public').on('click', function () {
+            openAclModal('public');
+        });
+
+        $('#btn-acl-make-private').on('click', function () {
+            openAclModal('private');
+        });
+
+        $('#btn-acl-cancel, #acomr-acl-modal').on('click', function (e) {
+            if (e.target === this) {
+                $('#acomr-acl-modal').hide();
+            }
+        });
+
+        $('#btn-acl-cancel').on('click', function () {
+            $('#acomr-acl-modal').hide();
+        });
+
+        $('#btn-acl-confirm').on('click', function () {
+            $('#acomr-acl-modal').hide();
+            startAclBatchUpdate(state.acl_retry_mode);
+        });
+
+        $('#btn-acl-retry-failed').on('click', function () {
+            if ($(this).prop('disabled')) {
+                return;
+            }
+            if (confirm('Retry ACL updates for all previously failed objects?')) {
+                state.acl_retry_mode = true;
+                startAclBatchUpdate(true);
+            }
+        });
+
+        $('#btn-acl-clear-failures').on('click', function () {
+            if ($(this).prop('disabled')) {
+                return;
+            }
+            if (!confirm('Clear the ACL failure log? This does not change cloud permissions.')) {
+                return;
+            }
+
+            $.ajax({
+                url: ACO_Media_Recovery_Settings.ajax_url,
+                method: 'POST',
+                data: {
+                    action: 'aco_media_recovery_acl_clear_failures',
+                    security: ACO_Media_Recovery_Settings.nonce
+                },
+                success: function (res) {
+                    if (res && res.success) {
+                        refreshAclStatus();
+                    } else {
+                        alert('Failed to clear failure log.');
+                    }
+                },
+                error: function () {
+                    alert('Failed to clear failure log.');
+                }
+            });
+        });
+
+        if ($('#acl-stat-failed').text() !== '0') {
+            refreshAclStatus(false);
+        }
 
         // Run health checks button
         $('#btn-run-health-checks').on('click', function() {
@@ -1163,6 +1264,210 @@ jQuery(document).ready(function ($) {
         
         $('#acomr-export-bar').css('width', percentage + '%').text(percentage + '%');
         $('#acomr-export-percent').text(percentage + '%');
+    }
+
+    /**
+     * Refresh ACL tool status and failure table.
+     */
+    function refreshAclStatus(showErrors) {
+        if (typeof showErrors === 'undefined') {
+            showErrors = true;
+        }
+
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_acl_status',
+                security: ACO_Media_Recovery_Settings.nonce
+            },
+            success: function (res) {
+                if (!res || !res.success || !res.data) {
+                    if (showErrors) {
+                        alert('Unable to load ACL tool status.');
+                    }
+                    return;
+                }
+
+                var status = res.data.status || {};
+                var failures = res.data.failures || [];
+
+                ACO_Media_Recovery_Settings.acl_available = status.available ? 1 : 0;
+
+                $('#acl-stat-offloaded').text(Number(status.offloaded_count || 0).toLocaleString());
+                $('#acl-stat-failed').text(Number(status.failed_count || 0).toLocaleString());
+
+                var banner = $('#acl-status-banner');
+                banner.removeClass('acomr-acl-status-available acomr-acl-status-unavailable');
+
+                if (status.available) {
+                    banner.addClass('acomr-acl-status-available');
+                    banner.html(
+                        '<strong>Ready</strong><span>Provider: ' +
+                        escapeHtml(status.provider || '') +
+                        ' · Bucket: ' +
+                        escapeHtml(status.bucket || '') +
+                        '</span>'
+                    );
+                } else {
+                    banner.addClass('acomr-acl-status-unavailable');
+                    banner.html(
+                        '<strong>Unavailable</strong><span id="acl-unavailable-reason">' +
+                        escapeHtml(status.reason || 'ACL updates are not available for the current storage configuration.') +
+                        '</span>'
+                    );
+                }
+
+                $('#btn-acl-make-public').prop('disabled', !status.available);
+                $('#btn-acl-make-private').prop('disabled', !status.available);
+                $('#btn-acl-retry-failed').prop('disabled', !status.available || failures.length < 1);
+                $('#btn-acl-clear-failures').prop('disabled', failures.length < 1);
+
+                renderAclFailures(failures);
+            },
+            error: function () {
+                if (showErrors) {
+                    alert('Unable to load ACL tool status.');
+                }
+            }
+        });
+    }
+
+    /**
+     * Render ACL failure log table rows.
+     */
+    function renderAclFailures(failures) {
+        var wrap = $('#acl-failures-wrap');
+        var tbody = $('#acl-failures-body');
+
+        if (!failures.length) {
+            wrap.hide();
+            tbody.html('<tr><td colspan="4" class="acomr-table-placeholder">No failed ACL updates recorded.</td></tr>');
+            return;
+        }
+
+        wrap.show();
+        var html = '';
+        failures.forEach(function (item) {
+            var modeLabel = (item.mode === 'private') ? 'Private' : 'Public';
+            html += '<tr>';
+            html += '<td>#' + escapeHtml(String(item.attachment_id || '')) + '</td>';
+            html += '<td>' + escapeHtml(modeLabel) + '</td>';
+            html += '<td><code>' + escapeHtml(item.key || '—') + '</code></td>';
+            html += '<td>' + escapeHtml(item.error || '') + '</td>';
+            html += '</tr>';
+        });
+        tbody.html(html);
+    }
+
+    /**
+     * Process offloaded attachments in paginated ACL update batches.
+     */
+    function startAclBatchUpdate(retryFailed) {
+        if (state.acl_running) {
+            return;
+        }
+
+        state.acl_running = true;
+        $('#console-section').slideDown();
+        $('#btn-acl-make-public, #btn-acl-make-private, #btn-acl-retry-failed, #btn-acl-clear-failures').prop('disabled', true);
+
+        var page = 1;
+        var perPage = 5;
+        var processedAttachments = 0;
+        var totalAttachments = 0;
+        var totals = { updated: 0, skipped: 0, failed: 0 };
+        var batchMode = state.acl_mode === 'private' ? 'private' : 'public';
+        var startLabel = retryFailed
+            ? '[START] Retrying failed ACL updates.'
+            : (batchMode === 'private'
+                ? '[START] Updating ACLs for offloaded media to private.'
+                : '[START] Updating ACLs for offloaded media to public-read.');
+
+        logToConsole(startLabel, 'title');
+        updateProgressBar(0, 1);
+        $('#progress-text').text(ACO_Media_Recovery_Settings.labels.acl_running);
+
+        function processNextBatch() {
+            $.ajax({
+                url: ACO_Media_Recovery_Settings.ajax_url,
+                method: 'POST',
+                data: {
+                    action: 'aco_media_recovery_acl_batch',
+                    security: ACO_Media_Recovery_Settings.nonce,
+                    page: page,
+                    per_page: perPage,
+                    retry_failed: retryFailed ? '1' : '0',
+                    acl_mode: batchMode
+                },
+                success: function (res) {
+                    if (!res || !res.success || !res.data) {
+                        var errMsg = 'Unknown error occurred.';
+                        if (res && res.data && res.data.message) {
+                            errMsg = res.data.message;
+                        }
+                        logToConsole('[ERROR] ACL batch failed: ' + errMsg, 'error');
+                        finishAclBatch();
+                        return;
+                    }
+
+                    var data = res.data;
+                    totalAttachments = data.total || totalAttachments;
+                    processedAttachments += data.processed_ids || 0;
+                    totals.updated += data.updated || 0;
+                    totals.skipped += data.skipped || 0;
+                    totals.failed += data.failed || 0;
+
+                    if (data.logs && data.logs.length) {
+                        data.logs.forEach(function (log) {
+                            var type = log.status === 'success' ? 'success' : (log.status === 'error' ? 'error' : 'muted');
+                            logToConsole(log.message, type);
+                        });
+                    }
+
+                    updateProgressBar(processedAttachments, Math.max(totalAttachments, 1));
+                    $('#progress-text').text(
+                        'Processed ' + processedAttachments + ' of ' + totalAttachments +
+                        ' attachments · Updated: ' + totals.updated +
+                        ' · Skipped: ' + totals.skipped +
+                        ' · Failed: ' + totals.failed
+                    );
+
+                    if (data.abort_batch) {
+                        logToConsole('[STOPPED] ' + (data.logs && data.logs[0] ? data.logs[0].message : 'ACL updates are not supported by this storage provider.'), 'error');
+                        finishAclBatch();
+                        refreshAclStatus(false);
+                        return;
+                    }
+
+                    if (data.is_completed) {
+                        logToConsole(
+                            '[COMPLETE] ' + ACO_Media_Recovery_Settings.labels.acl_complete +
+                            ' Updated: ' + totals.updated + ', Skipped: ' + totals.skipped + ', Failed: ' + totals.failed + '.',
+                            totals.failed > 0 ? 'warning' : 'success'
+                        );
+                        finishAclBatch();
+                        return;
+                    }
+
+                    page++;
+                    processNextBatch();
+                },
+                error: function (xhr) {
+                    var detail = xhr.status ? ' (HTTP ' + xhr.status + ')' : '';
+                    logToConsole('[ERROR] ACL batch request failed' + detail + '.', 'error');
+                    finishAclBatch();
+                }
+            });
+        }
+
+        function finishAclBatch() {
+            state.acl_running = false;
+            state.acl_retry_mode = false;
+            refreshAclStatus(false);
+        }
+
+        processNextBatch();
     }
 
     /**
