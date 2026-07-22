@@ -803,8 +803,60 @@ textarea#json_input:focus {
 .acomr-acl-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    align-items: center;
+    gap: 16px 24px;
+    margin-top: 16px;
     margin-bottom: 20px;
+}
+
+.acomr-acl-actions-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.acomr-recovery-container .acomr-acl-actions .acomr-btn {
+    margin: 0 !important;
+}
+
+.acomr-acl-option {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 4px;
+}
+
+.acomr-acl-option-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-weight: 600;
+    color: #1d2327;
+    cursor: pointer;
+}
+
+.acomr-acl-option-label input {
+    margin-top: 3px;
+}
+
+.acomr-acl-option-help {
+    margin: 8px 0 0 24px;
+    font-size: 13px;
+    color: #646970;
+    line-height: 1.5;
+}
+
+.acomr-acl-scan-note {
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    background: #f0f6fc;
+    border: 1px solid #c5d9ed;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #1d2327;
+    line-height: 1.5;
 }
 
 .acomr-acl-failures-wrap h4 {
@@ -822,6 +874,59 @@ textarea#json_input:focus {
 
 .acomr-acl-confirm-list li {
     margin-bottom: 6px;
+}
+
+.acomr-bucket-policy-panel {
+    margin-bottom: 20px;
+    padding: 16px;
+    border: 1px solid #dcdcde;
+    border-radius: 8px;
+    background: #f6f7f7;
+}
+
+.acomr-bucket-policy-fields {
+    margin: 14px 0;
+}
+
+.acomr-bucket-policy-fields label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.acomr-bucket-policy-fields .acomr-input {
+    width: 100%;
+    max-width: 420px;
+}
+
+.acomr-field-help {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: #646970;
+}
+
+.acomr-bucket-policy-preview {
+    margin-top: 12px;
+    font-size: 12px;
+}
+
+.acomr-bucket-policy-preview pre {
+    margin-top: 8px;
+    padding: 10px;
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 6px;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.acomr-section-divider {
+    margin: 24px 0;
+    border: 0;
+    border-top: 1px solid #dcdcde;
 }
 
 .acomr-modal-overlay {

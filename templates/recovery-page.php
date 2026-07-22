@@ -5,6 +5,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 $acomr_settings = ACO_Media_Recovery_Ajax::get_saved_settings();
 $acomr_acl_status = ACO_Media_Recovery_ACL_Updater::get_feature_status();
+$acomr_acl_scan   = ACO_Media_Recovery_ACL_Updater::get_scan_progress();
+$acomr_bucket_policy = ACO_Media_Recovery_Bucket_Policy_Manager::get_status();
 ?>
 <div class="wrap acomr-recovery-container">
     <div class="acomr-header">
@@ -406,7 +408,63 @@ $acomr_acl_status = ACO_Media_Recovery_ACL_Updater::get_feature_status();
                 </div>
 
                 <p class="acomr-description" style="margin-bottom: 15px;">
-                    <?php _e( 'Change cloud object ACLs for already offloaded media — make files public-read or private without re-uploading. Only permission metadata on existing objects is updated.', 'aco-media-recovery' ); ?>
+                    <?php _e( 'For large libraries (thousands of attachments), use bucket policy first — it updates access for all objects in one step. Per-object ACL tools below are for targeted fixes only.', 'aco-media-recovery' ); ?>
+                </p>
+
+                <div class="acomr-bucket-policy-panel" id="bucket-policy-panel">
+                    <div class="acomr-section-header" style="margin-bottom: 12px;">
+                        <h4 style="margin: 0; font-size: 14px; font-weight: 600;"><?php _e( 'Bucket Policy (recommended)', 'aco-media-recovery' ); ?></h4>
+                    </div>
+
+                    <div class="acomr-acl-status-banner <?php echo $acomr_bucket_policy['available'] ? 'acomr-acl-status-available' : 'acomr-acl-status-unavailable'; ?>" id="bucket-policy-status-banner">
+                        <?php if ( $acomr_bucket_policy['available'] ) : ?>
+                            <strong><?php _e( 'Bucket policy supported', 'aco-media-recovery' ); ?></strong>
+                            <span id="bucket-policy-status-text">
+                                <?php
+                                if ( ! empty( $acomr_bucket_policy['is_public_read'] ) ) {
+                                    esc_html_e( 'Public read is enabled via bucket policy.', 'aco-media-recovery' );
+                                } elseif ( ! empty( $acomr_bucket_policy['has_policy'] ) ) {
+                                    esc_html_e( 'A bucket policy exists but public read was not detected for the configured prefix.', 'aco-media-recovery' );
+                                } else {
+                                    esc_html_e( 'No bucket policy detected.', 'aco-media-recovery' );
+                                }
+                                ?>
+                            </span>
+                        <?php else : ?>
+                            <strong><?php _e( 'Unavailable', 'aco-media-recovery' ); ?></strong>
+                            <span id="bucket-policy-unavailable-reason"><?php echo esc_html( $acomr_bucket_policy['reason'] ); ?></span>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="acomr-bucket-policy-fields">
+                        <label for="bucket-policy-prefix"><?php _e( 'Object key prefix (optional)', 'aco-media-recovery' ); ?></label>
+                        <input type="text" id="bucket-policy-prefix" class="acomr-input" value="<?php echo esc_attr( $acomr_bucket_policy['prefix'] ); ?>" placeholder="wp-content/uploads" <?php disabled( ! $acomr_bucket_policy['available'] ); ?> />
+                        <p class="acomr-field-help"><?php _e( 'Leave empty to allow public read for the entire bucket. Use your Offload path prefix to scope access to uploads only.', 'aco-media-recovery' ); ?></p>
+                    </div>
+
+                    <div class="acomr-acl-actions">
+                        <button class="acomr-btn acomr-btn-primary" id="btn-bucket-policy-public" <?php disabled( ! $acomr_bucket_policy['available'] ); ?>>
+                            <?php _e( 'Apply Public Bucket Policy', 'aco-media-recovery' ); ?>
+                        </button>
+                        <button class="acomr-btn acomr-btn-secondary" id="btn-bucket-policy-private" <?php disabled( ! $acomr_bucket_policy['available'] ); ?>>
+                            <?php _e( 'Remove Public Bucket Policy', 'aco-media-recovery' ); ?>
+                        </button>
+                    </div>
+
+                    <details class="acomr-bucket-policy-preview" id="bucket-policy-preview-wrap" <?php echo empty( $acomr_bucket_policy['policy_preview'] ) ? 'style="display:none;"' : ''; ?>>
+                        <summary><?php _e( 'View current bucket policy JSON', 'aco-media-recovery' ); ?></summary>
+                        <pre id="bucket-policy-preview"><?php echo esc_html( $acomr_bucket_policy['policy_preview'] ); ?></pre>
+                    </details>
+                </div>
+
+                <hr class="acomr-section-divider" />
+
+                <div class="acomr-section-header" style="margin-bottom: 12px;">
+                    <h4 style="margin: 0; font-size: 14px; font-weight: 600;"><?php _e( 'Per-object ACL (slow on large libraries)', 'aco-media-recovery' ); ?></h4>
+                </div>
+
+                <p class="acomr-description" style="margin-bottom: 15px;">
+                    <?php _e( 'Change cloud object ACLs one file at a time. Useful for mixed public/private buckets or when bucket policy is not an option.', 'aco-media-recovery' ); ?>
                 </p>
 
                 <div class="acomr-acl-status-banner <?php echo $acomr_acl_status['available'] ? 'acomr-acl-status-available' : 'acomr-acl-status-unavailable'; ?>" id="acl-status-banner">
@@ -434,24 +492,60 @@ $acomr_acl_status = ACO_Media_Recovery_ACL_Updater::get_feature_status();
                         <span class="acomr-acl-stat-label"><?php _e( 'Offloaded Attachments', 'aco-media-recovery' ); ?></span>
                     </div>
                     <div class="acomr-acl-stat">
+                        <span class="acomr-acl-stat-value" id="acl-stat-scanned"><?php echo number_format_i18n( $acomr_acl_scan['scanned_count'] ); ?></span>
+                        <span class="acomr-acl-stat-label"><?php _e( 'Scanned (ACL)', 'aco-media-recovery' ); ?></span>
+                    </div>
+                    <div class="acomr-acl-stat">
+                        <span class="acomr-acl-stat-value" id="acl-stat-remaining"><?php echo number_format_i18n( $acomr_acl_scan['remaining_count'] ); ?></span>
+                        <span class="acomr-acl-stat-label"><?php _e( 'Remaining', 'aco-media-recovery' ); ?></span>
+                    </div>
+                    <div class="acomr-acl-stat">
                         <span class="acomr-acl-stat-value" id="acl-stat-failed"><?php echo number_format_i18n( $acomr_acl_status['failed_count'] ); ?></span>
                         <span class="acomr-acl-stat-label"><?php _e( 'Failed ACL Updates', 'aco-media-recovery' ); ?></span>
                     </div>
                 </div>
 
+                <p class="acomr-acl-scan-note" id="acl-scan-note" <?php echo empty( $acomr_acl_scan['has_progress'] ) ? 'style="display:none;"' : ''; ?>>
+                    <?php
+                    printf(
+                        /* translators: 1: scanned count, 2: remaining count */
+                        esc_html__( 'Previous ACL scan progress saved: %1$s attachments scanned, %2$s remaining. New runs continue with unscanned items unless you reset progress.', 'aco-media-recovery' ),
+                        number_format_i18n( $acomr_acl_scan['scanned_count'] ),
+                        number_format_i18n( $acomr_acl_scan['remaining_count'] )
+                    );
+                    ?>
+                </p>
+
+                <div class="acomr-acl-option">
+                    <label class="acomr-acl-option-label" for="acl-smart-original-skip">
+                        <input type="checkbox" id="acl-smart-original-skip" value="1" checked <?php disabled( ! $acomr_acl_status['available'] ); ?> />
+                        <?php _e( 'Skip attachment when original file already matches target ACL', 'aco-media-recovery' ); ?>
+                    </label>
+                    <p class="acomr-acl-option-help" id="acl-smart-original-help">
+                        <?php _e( 'When enabled, only the main file ACL is checked first. If it already matches (public or private), all thumbnails for that attachment are skipped. If not, the original and every thumbnail are updated. When disabled, the original is always updated and each thumbnail is checked individually.', 'aco-media-recovery' ); ?>
+                    </p>
+                </div>
+
                 <div class="acomr-acl-actions">
-                    <button class="acomr-btn acomr-btn-primary" id="btn-acl-make-public" <?php disabled( ! $acomr_acl_status['available'] ); ?>>
-                        <?php _e( 'Make Existing Files Public', 'aco-media-recovery' ); ?>
-                    </button>
-                    <button class="acomr-btn acomr-btn-secondary" id="btn-acl-make-private" <?php disabled( ! $acomr_acl_status['available'] ); ?>>
-                        <?php _e( 'Make Existing Files Private', 'aco-media-recovery' ); ?>
-                    </button>
-                    <button class="acomr-btn acomr-btn-secondary" id="btn-acl-retry-failed" <?php disabled( ! $acomr_acl_status['available'] || $acomr_acl_status['failed_count'] < 1 ); ?>>
-                        <?php _e( 'Retry Failed Items', 'aco-media-recovery' ); ?>
-                    </button>
-                    <button class="acomr-btn acomr-btn-secondary" id="btn-acl-clear-failures" <?php disabled( $acomr_acl_status['failed_count'] < 1 ); ?>>
-                        <?php _e( 'Clear Failure Log', 'aco-media-recovery' ); ?>
-                    </button>
+                    <div class="acomr-acl-actions-group">
+                        <button class="acomr-btn acomr-btn-primary" id="btn-acl-make-public" <?php disabled( ! $acomr_acl_status['available'] ); ?>>
+                            <?php _e( 'Make Existing Files Public', 'aco-media-recovery' ); ?>
+                        </button>
+                        <button class="acomr-btn acomr-btn-secondary" id="btn-acl-make-private" <?php disabled( ! $acomr_acl_status['available'] ); ?>>
+                            <?php _e( 'Make Existing Files Private', 'aco-media-recovery' ); ?>
+                        </button>
+                    </div>
+                    <div class="acomr-acl-actions-group">
+                        <button class="acomr-btn acomr-btn-secondary" id="btn-acl-retry-failed" <?php disabled( ! $acomr_acl_status['available'] || $acomr_acl_status['failed_count'] < 1 ); ?>>
+                            <?php _e( 'Retry Failed Items', 'aco-media-recovery' ); ?>
+                        </button>
+                        <button class="acomr-btn acomr-btn-secondary" id="btn-acl-clear-failures" <?php disabled( $acomr_acl_status['failed_count'] < 1 ); ?>>
+                            <?php _e( 'Clear Failure Log', 'aco-media-recovery' ); ?>
+                        </button>
+                        <button class="acomr-btn acomr-btn-secondary" id="btn-acl-reset-scan" <?php disabled( ! $acomr_acl_status['available'] || $acomr_acl_scan['scanned_count'] < 1 ); ?>>
+                            <?php _e( 'Reset Scan Progress', 'aco-media-recovery' ); ?>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="acomr-acl-failures-wrap" id="acl-failures-wrap" <?php echo $acomr_acl_status['failed_count'] < 1 ? 'style="display:none;"' : ''; ?>>
@@ -487,6 +581,8 @@ $acomr_acl_status = ACO_Media_Recovery_ACL_Updater::get_feature_status();
                 <li><?php _e( 'Only object permissions are changed — files are not re-uploaded or modified.', 'aco-media-recovery' ); ?></li>
                 <li id="acl-modal-skip-note"><?php _e( 'Objects that already match the target permission will be skipped automatically.', 'aco-media-recovery' ); ?></li>
                 <li><?php _e( 'Original files and all registered thumbnail sizes are included.', 'aco-media-recovery' ); ?></li>
+                <li id="acl-modal-continue-note" style="display: none;"></li>
+                <li><?php _e( 'Scanned attachments are remembered so you can stop and continue later. Use Reset Scan Progress to force a full rescan.', 'aco-media-recovery' ); ?></li>
                 <li><?php _e( 'Failed updates are logged and can be retried later.', 'aco-media-recovery' ); ?></li>
             </ul>
             <div class="acomr-modal-actions">

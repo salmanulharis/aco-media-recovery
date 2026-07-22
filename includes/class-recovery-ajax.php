@@ -21,6 +21,10 @@ class ACO_Media_Recovery_Ajax {
         add_action( 'wp_ajax_aco_media_recovery_acl_status', [ __CLASS__, 'acl_status' ] );
         add_action( 'wp_ajax_aco_media_recovery_acl_batch', [ __CLASS__, 'acl_batch' ] );
         add_action( 'wp_ajax_aco_media_recovery_acl_clear_failures', [ __CLASS__, 'acl_clear_failures' ] );
+        add_action( 'wp_ajax_aco_media_recovery_acl_reset_scan', [ __CLASS__, 'acl_reset_scan' ] );
+        add_action( 'wp_ajax_aco_media_recovery_bucket_policy_status', [ __CLASS__, 'bucket_policy_status' ] );
+        add_action( 'wp_ajax_aco_media_recovery_bucket_policy_apply', [ __CLASS__, 'bucket_policy_apply' ] );
+        add_action( 'wp_ajax_aco_media_recovery_bucket_policy_remove', [ __CLASS__, 'bucket_policy_remove' ] );
     }
 
     /**
@@ -2099,11 +2103,15 @@ class ACO_Media_Recovery_Ajax {
 
         $status   = ACO_Media_Recovery_ACL_Updater::get_feature_status();
         $failures = ACO_Media_Recovery_ACL_Updater::get_failures_for_display();
+        $bucket   = ACO_Media_Recovery_Bucket_Policy_Manager::get_status();
+        $scan     = ACO_Media_Recovery_ACL_Updater::get_scan_progress();
 
         wp_send_json_success(
             [
-                'status'   => $status,
-                'failures' => $failures,
+                'status'        => $status,
+                'failures'      => $failures,
+                'bucket_policy' => $bucket,
+                'scan_progress' => $scan,
             ]
         );
     }
@@ -2120,13 +2128,15 @@ class ACO_Media_Recovery_Ajax {
 
         @set_time_limit( 0 );
 
-        $page         = isset( $_POST['page'] ) ? max( 1, intval( $_POST['page'] ) ) : 1;
-        $per_page     = isset( $_POST['per_page'] ) ? max( 1, min( 25, intval( $_POST['per_page'] ) ) ) : 5;
+        $last_id      = isset( $_POST['last_id'] ) ? max( 0, intval( $_POST['last_id'] ) ) : 0;
+        $per_page     = isset( $_POST['per_page'] ) ? max( 1, min( 50, intval( $_POST['per_page'] ) ) ) : 25;
         $retry_failed = isset( $_POST['retry_failed'] ) && $_POST['retry_failed'] === '1';
         $acl_mode     = isset( $_POST['acl_mode'] ) ? sanitize_text_field( wp_unslash( $_POST['acl_mode'] ) ) : ACO_Media_Recovery_ACL_Updater::MODE_PUBLIC;
-        $acl_mode     = ACO_Media_Recovery_ACL_Updater::normalize_acl_mode( $acl_mode );
+        $acl_mode            = ACO_Media_Recovery_ACL_Updater::normalize_acl_mode( $acl_mode );
+        $smart_original_skip = ! isset( $_POST['smart_original_skip'] ) || $_POST['smart_original_skip'] === '1';
+        $skip_scanned        = ! $retry_failed;
 
-        $query = ACO_Media_Recovery_ACL_Updater::get_offloaded_attachment_ids( $page, $per_page, $retry_failed );
+        $query = ACO_Media_Recovery_ACL_Updater::get_offloaded_attachment_ids( $last_id, $per_page, $retry_failed, $skip_scanned );
 
         if ( empty( $query['ids'] ) ) {
             wp_send_json_success(
@@ -2138,12 +2148,20 @@ class ACO_Media_Recovery_Ajax {
                     'remaining_failures' => count( ACO_Media_Recovery_ACL_Updater::get_failures() ),
                     'processed_ids'      => 0,
                     'total'              => $query['total'],
+                    'last_id'            => $query['last_id'],
                     'is_completed'       => true,
+                    'scan_progress'      => $query['scan_progress'] ?? ACO_Media_Recovery_ACL_Updater::get_scan_progress(),
                 ]
             );
         }
 
-        $result = ACO_Media_Recovery_ACL_Updater::process_batch( $query['ids'], $acl_mode, $retry_failed );
+        $result = ACO_Media_Recovery_ACL_Updater::process_batch(
+            $query['ids'],
+            $acl_mode,
+            $retry_failed,
+            $smart_original_skip,
+            ! $retry_failed
+        );
 
         wp_send_json_success(
             array_merge(
@@ -2151,10 +2169,98 @@ class ACO_Media_Recovery_Ajax {
                 [
                     'processed_ids' => count( $query['ids'] ),
                     'total'         => $query['total'],
-                    'is_completed'  => ( $page * $per_page ) >= $query['total'],
-                    'current_page'  => $page,
+                    'last_id'       => $query['last_id'],
+                    'is_completed'  => count( $query['ids'] ) < $per_page,
+                    'scan_progress' => ACO_Media_Recovery_ACL_Updater::get_scan_progress(),
                 ]
             )
+        );
+    }
+
+    /**
+     * Clear ACL scan flags so all offloaded attachments are processed again.
+     */
+    public static function acl_reset_scan() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $removed = ACO_Media_Recovery_ACL_Updater::reset_scan_flags();
+
+        wp_send_json_success(
+            [
+                'removed'       => $removed,
+                'scan_progress' => ACO_Media_Recovery_ACL_Updater::get_scan_progress(),
+                'message'       => __( 'ACL scan progress reset. All offloaded attachments will be processed on the next run.', 'aco-media-recovery' ),
+            ]
+        );
+    }
+
+    /**
+     * Return bucket policy status for the active bucket.
+     */
+    public static function bucket_policy_status() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        wp_send_json_success(
+            [
+                'bucket_policy' => ACO_Media_Recovery_Bucket_Policy_Manager::get_status(),
+            ]
+        );
+    }
+
+    /**
+     * Apply public-read bucket policy (optionally scoped to prefix).
+     */
+    public static function bucket_policy_apply() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $prefix = isset( $_POST['prefix'] ) ? sanitize_text_field( wp_unslash( $_POST['prefix'] ) ) : '';
+        $result = ACO_Media_Recovery_Bucket_Policy_Manager::apply_public_read( $prefix );
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success(
+            [
+                'message'       => __( 'Public read bucket policy applied successfully.', 'aco-media-recovery' ),
+                'bucket_policy' => ACO_Media_Recovery_Bucket_Policy_Manager::get_status(),
+            ]
+        );
+    }
+
+    /**
+     * Remove plugin-managed public-read bucket policy statement.
+     */
+    public static function bucket_policy_remove() {
+        check_ajax_referer( 'aco_media_recovery_nonce', 'security' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => __( 'Unauthorized access.', 'aco-media-recovery' ) ] );
+        }
+
+        $result = ACO_Media_Recovery_Bucket_Policy_Manager::remove_public_read();
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( [ 'message' => $result->get_error_message() ] );
+        }
+
+        wp_send_json_success(
+            [
+                'message'       => __( 'Public read bucket policy removed.', 'aco-media-recovery' ),
+                'bucket_policy' => ACO_Media_Recovery_Bucket_Policy_Manager::get_status(),
+            ]
         );
     }
 

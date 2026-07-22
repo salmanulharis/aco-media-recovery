@@ -3,7 +3,7 @@ Contributors: acowebs
 Tags: media, recovery, cloud, offload, s3, gcs, r2
 Requires at least: 5.8
 Tested up to: 6.5
-Stable tag: 1.0.8   
+Stable tag: 1.0.11   
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -41,6 +41,19 @@ Recovery operations only download files from cloud storage to your server. The P
 All providers supported by Offload Media Cloud Storage Pro are supported, including Amazon S3, Google Cloud Storage, Cloudflare R2, DigitalOcean Spaces, Wasabi, and custom S3 endpoints.
 
 == Changelog ==
+
+= 1.0.11 =
+* Persist ACL scan progress per attachment so bulk runs can stop and continue later.
+* Show scanned and remaining counts; add Reset Scan Progress to force a full rescan of all offloaded attachments.
+
+= 1.0.10 =
+* Add smart original-file ACL option: when enabled, skip entire attachment (including thumbnails) if the main file already matches the target ACL; when disabled, always update the original and check each thumbnail individually.
+* Applies to both Make Public and Make Private bulk ACL updates.
+
+= 1.0.9 =
+* Add bucket policy tools to apply or remove public-read access in one step (recommended for 28k+ attachments).
+* Optimize per-object ACL batches: cursor pagination, 25 attachments per request, fast PutObjectAcl mode, compact logging.
+* Bucket policy supports S3, DigitalOcean Spaces, Wasabi, MinIO, and Cloudflare R2.
 
 = 1.0.8 =
 * Add "Make Existing Files Private" bulk ACL tool alongside the existing public ACL updater.

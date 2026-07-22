@@ -77,9 +77,18 @@ class ACO_Media_Recovery_Admin {
                     'acl_confirm_private_desc'  => __( 'This tool will scan all offloaded media and update each cloud object\'s ACL to private.', 'aco-media-recovery' ),
                     'acl_skip_public'           => __( 'Objects that are already public will be skipped automatically.', 'aco-media-recovery' ),
                     'acl_skip_private'          => __( 'Objects that are already private will be skipped automatically.', 'aco-media-recovery' ),
+                    'acl_skip_smart_public'     => __( 'If the original file is already public, all thumbnails for that attachment are skipped. Otherwise the original and all thumbnails are updated to public-read.', 'aco-media-recovery' ),
+                    'acl_skip_smart_private'    => __( 'If the original file is already private, all thumbnails for that attachment are skipped. Otherwise the original and all thumbnails are updated to private.', 'aco-media-recovery' ),
+                    'acl_skip_per_thumb_public' => __( 'The original file is always updated. Each thumbnail is checked individually and skipped only if it is already public.', 'aco-media-recovery' ),
+                    'acl_skip_per_thumb_private'=> __( 'The original file is always updated. Each thumbnail is checked individually and skipped only if it is already private.', 'aco-media-recovery' ),
                     'acl_running'       => __( 'Updating object ACLs...', 'aco-media-recovery' ),
                     'acl_complete'      => __( 'ACL update batch finished.', 'aco-media-recovery' ),
                     'acl_no_failures'   => __( 'No failed items to retry.', 'aco-media-recovery' ),
+                    'acl_reset_scan_confirm' => __( 'Reset ACL scan progress? All offloaded attachments will be processed again on the next run.', 'aco-media-recovery' ),
+                    'acl_reset_scan_failed'  => __( 'Failed to reset scan progress.', 'aco-media-recovery' ),
+                    'acl_continue_note'      => __( 'Continuing previous scan: %1$s already scanned, %2$s remaining will be processed.', 'aco-media-recovery' ),
+                    'acl_scan_note'          => __( 'Previous ACL scan progress saved: %1$s attachments scanned, %2$s remaining. New runs continue with unscanned items unless you reset progress.', 'aco-media-recovery' ),
+                    'acl_scan_complete'      => __( 'All offloaded attachments have been scanned. Reset scan progress to process every attachment again.', 'aco-media-recovery' ),
                 ]
             ]
         );

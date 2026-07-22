@@ -13,7 +13,8 @@ jQuery(document).ready(function ($) {
         export_cancelled: false,
         acl_running: false,
         acl_retry_mode: false,
-        acl_mode: 'public'
+        acl_mode: 'public',
+        acl_scan_progress: null
     };
 
     // Ensure the AJAX URL scheme matches the current page protocol to prevent SSL/Redirect POST drops
@@ -220,6 +221,25 @@ jQuery(document).ready(function ($) {
         });
 
         // ACL update tool
+        function isAclSmartOriginalSkipEnabled() {
+            return $('#acl-smart-original-skip').is(':checked');
+        }
+
+        function getAclSkipNote(isPublic) {
+            var labels = ACO_Media_Recovery_Settings.labels || {};
+            var smartSkip = isAclSmartOriginalSkipEnabled();
+
+            if (smartSkip) {
+                return isPublic
+                    ? (labels.acl_skip_smart_public || 'If the original file is already public, all thumbnails for that attachment are skipped. Otherwise the original and all thumbnails are updated to public-read.')
+                    : (labels.acl_skip_smart_private || 'If the original file is already private, all thumbnails for that attachment are skipped. Otherwise the original and all thumbnails are updated to private.');
+            }
+
+            return isPublic
+                ? (labels.acl_skip_per_thumb_public || 'The original file is always updated. Each thumbnail is checked individually and skipped only if it is already public.')
+                : (labels.acl_skip_per_thumb_private || 'The original file is always updated. Each thumbnail is checked individually and skipped only if it is already private.');
+        }
+
         function openAclModal(mode) {
             if (parseInt(ACO_Media_Recovery_Settings.acl_available, 10) !== 1) {
                 return;
@@ -241,14 +261,29 @@ jQuery(document).ready(function ($) {
                     ? (labels.acl_confirm_public_desc || 'This tool will scan all offloaded media and update each cloud object\'s ACL to public-read.')
                     : (labels.acl_confirm_private_desc || 'This tool will scan all offloaded media and update each cloud object\'s ACL to private.')
             );
-            $('#acl-modal-skip-note').text(
-                isPublic
-                    ? (labels.acl_skip_public || 'Objects that are already public will be skipped automatically.')
-                    : (labels.acl_skip_private || 'Objects that are already private will be skipped automatically.')
-            );
+            $('#acl-modal-skip-note').text(getAclSkipNote(isPublic));
+
+            var scan = state.acl_scan_progress || {};
+            var continueNote = $('#acl-modal-continue-note');
+            if (scan.has_progress && scan.remaining_count > 0) {
+                continueNote.text(
+                    (labels.acl_continue_note || 'Continuing previous scan: %1$s already scanned, %2$s remaining will be processed.')
+                        .replace('%1$s', Number(scan.scanned_count || 0).toLocaleString())
+                        .replace('%2$s', Number(scan.remaining_count || 0).toLocaleString())
+                ).show();
+            } else {
+                continueNote.hide().text('');
+            }
 
             $('#acomr-acl-modal').css('display', 'flex');
         }
+
+        $('#acl-smart-original-skip').on('change', function () {
+            if ($('#acomr-acl-modal').is(':visible')) {
+                var isPublic = state.acl_mode === 'public';
+                $('#acl-modal-skip-note').text(getAclSkipNote(isPublic));
+            }
+        });
 
         $('#btn-acl-make-public').on('click', function () {
             openAclModal('public');
@@ -311,9 +346,73 @@ jQuery(document).ready(function ($) {
             });
         });
 
+        $('#btn-acl-reset-scan').on('click', function () {
+            if ($(this).prop('disabled')) {
+                return;
+            }
+            var labels = ACO_Media_Recovery_Settings.labels || {};
+            var confirmMsg = labels.acl_reset_scan_confirm || 'Reset ACL scan progress? All offloaded attachments will be processed again on the next run.';
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            $.ajax({
+                url: ACO_Media_Recovery_Settings.ajax_url,
+                method: 'POST',
+                data: {
+                    action: 'aco_media_recovery_acl_reset_scan',
+                    security: ACO_Media_Recovery_Settings.nonce
+                },
+                success: function (res) {
+                    if (res && res.success && res.data) {
+                        if (res.data.message) {
+                            alert(res.data.message);
+                        }
+                        renderAclScanProgress(res.data.scan_progress || {});
+                    }
+                    refreshAclStatus(false);
+                },
+                error: function () {
+                    alert(labels.acl_reset_scan_failed || 'Failed to reset scan progress.');
+                }
+            });
+        });
+
+        if ($('#acl-stat-scanned').length) {
+            state.acl_scan_progress = {
+                total_offloaded: parseInt(String($('#acl-stat-offloaded').text()).replace(/,/g, ''), 10) || 0,
+                scanned_count: parseInt(String($('#acl-stat-scanned').text()).replace(/,/g, ''), 10) || 0,
+                remaining_count: parseInt(String($('#acl-stat-remaining').text()).replace(/,/g, ''), 10) || 0,
+                has_progress: false
+            };
+            state.acl_scan_progress.has_progress = state.acl_scan_progress.scanned_count > 0 &&
+                state.acl_scan_progress.remaining_count > 0;
+        }
+
         if ($('#acl-stat-failed').text() !== '0') {
             refreshAclStatus(false);
         }
+
+        $('#btn-bucket-policy-public').on('click', function () {
+            if ($(this).prop('disabled')) {
+                return;
+            }
+            var prefix = $('#bucket-policy-prefix').val() || '';
+            if (!confirm('Apply a public-read bucket policy? This affects all objects under the chosen prefix instantly.')) {
+                return;
+            }
+            applyBucketPolicy(prefix);
+        });
+
+        $('#btn-bucket-policy-private').on('click', function () {
+            if ($(this).prop('disabled')) {
+                return;
+            }
+            if (!confirm('Remove the plugin-managed public-read bucket policy statement? Objects may become private unless other policies grant access.')) {
+                return;
+            }
+            removeBucketPolicy();
+        });
 
         // Run health checks button
         $('#btn-run-health-checks').on('click', function() {
@@ -1322,8 +1421,11 @@ jQuery(document).ready(function ($) {
                 $('#btn-acl-make-private').prop('disabled', !status.available);
                 $('#btn-acl-retry-failed').prop('disabled', !status.available || failures.length < 1);
                 $('#btn-acl-clear-failures').prop('disabled', failures.length < 1);
+                $('#acl-smart-original-skip').prop('disabled', !status.available);
 
                 renderAclFailures(failures);
+                renderAclScanProgress(res.data.scan_progress || {});
+                renderBucketPolicyStatus(res.data.bucket_policy || {});
             },
             error: function () {
                 if (showErrors) {
@@ -1334,8 +1436,125 @@ jQuery(document).ready(function ($) {
     }
 
     /**
+     * Update bucket policy panel from status payload.
+     */
+    function renderBucketPolicyStatus(bucketPolicy) {
+        var banner = $('#bucket-policy-status-banner');
+        banner.removeClass('acomr-acl-status-available acomr-acl-status-unavailable');
+
+        if (bucketPolicy.available) {
+            banner.addClass('acomr-acl-status-available');
+            var statusText = 'No bucket policy detected.';
+            if (bucketPolicy.is_public_read) {
+                statusText = 'Public read is enabled via bucket policy.';
+            } else if (bucketPolicy.has_policy) {
+                statusText = 'A bucket policy exists but public read was not detected for the configured prefix.';
+            }
+            banner.html('<strong>Bucket policy supported</strong><span id="bucket-policy-status-text">' + escapeHtml(statusText) + '</span>');
+            $('#btn-bucket-policy-public, #btn-bucket-policy-private, #bucket-policy-prefix').prop('disabled', false);
+        } else {
+            banner.addClass('acomr-acl-status-unavailable');
+            banner.html(
+                '<strong>Unavailable</strong><span id="bucket-policy-unavailable-reason">' +
+                escapeHtml(bucketPolicy.reason || 'Bucket policy is unavailable for this provider.') +
+                '</span>'
+            );
+            $('#btn-bucket-policy-public, #btn-bucket-policy-private, #bucket-policy-prefix').prop('disabled', true);
+        }
+
+        if (bucketPolicy.prefix && !$('#bucket-policy-prefix').is(':focus')) {
+            $('#bucket-policy-prefix').val(bucketPolicy.prefix);
+        }
+
+        var previewWrap = $('#bucket-policy-preview-wrap');
+        var preview = $('#bucket-policy-preview');
+        if (bucketPolicy.policy_preview) {
+            preview.text(bucketPolicy.policy_preview);
+            previewWrap.show();
+        } else {
+            preview.text('');
+            previewWrap.hide();
+        }
+    }
+
+    function applyBucketPolicy(prefix) {
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_bucket_policy_apply',
+                security: ACO_Media_Recovery_Settings.nonce,
+                prefix: prefix
+            },
+            success: function (res) {
+                if (res && res.success) {
+                    renderBucketPolicyStatus(res.data.bucket_policy || {});
+                    alert(res.data.message || 'Bucket policy applied.');
+                } else {
+                    alert((res && res.data && res.data.message) ? res.data.message : 'Failed to apply bucket policy.');
+                }
+            },
+            error: function () {
+                alert('Failed to apply bucket policy.');
+            }
+        });
+    }
+
+    function removeBucketPolicy() {
+        $.ajax({
+            url: ACO_Media_Recovery_Settings.ajax_url,
+            method: 'POST',
+            data: {
+                action: 'aco_media_recovery_bucket_policy_remove',
+                security: ACO_Media_Recovery_Settings.nonce
+            },
+            success: function (res) {
+                if (res && res.success) {
+                    renderBucketPolicyStatus(res.data.bucket_policy || {});
+                    alert(res.data.message || 'Bucket policy removed.');
+                } else {
+                    alert((res && res.data && res.data.message) ? res.data.message : 'Failed to remove bucket policy.');
+                }
+            },
+            error: function () {
+                alert('Failed to remove bucket policy.');
+            }
+        });
+    }
+
+    /**
      * Render ACL failure log table rows.
      */
+    /**
+     * Update ACL scan progress stats and resume note.
+     */
+    function renderAclScanProgress(scan) {
+        scan = scan || {};
+        state.acl_scan_progress = scan;
+
+        $('#acl-stat-scanned').text(Number(scan.scanned_count || 0).toLocaleString());
+        $('#acl-stat-remaining').text(Number(scan.remaining_count || 0).toLocaleString());
+
+        var note = $('#acl-scan-note');
+        var labels = ACO_Media_Recovery_Settings.labels || {};
+
+        if (scan.has_progress && scan.remaining_count > 0) {
+            var template = labels.acl_scan_note || 'Previous ACL scan progress saved: %1$s attachments scanned, %2$s remaining. New runs continue with unscanned items unless you reset progress.';
+            note.text(
+                template
+                    .replace('%1$s', Number(scan.scanned_count || 0).toLocaleString())
+                    .replace('%2$s', Number(scan.remaining_count || 0).toLocaleString())
+            ).show();
+        } else if ((scan.scanned_count || 0) > 0 && (scan.remaining_count || 0) === 0) {
+            note.text(labels.acl_scan_complete || 'All offloaded attachments have been scanned. Reset scan progress to process every attachment again.').show();
+        } else {
+            note.hide().text('');
+        }
+
+        var aclAvailable = parseInt(ACO_Media_Recovery_Settings.acl_available, 10) === 1;
+        $('#btn-acl-reset-scan').prop('disabled', !aclAvailable || !(scan.scanned_count > 0));
+    }
+
     function renderAclFailures(failures) {
         var wrap = $('#acl-failures-wrap');
         var tbody = $('#acl-failures-body');
@@ -1363,6 +1582,10 @@ jQuery(document).ready(function ($) {
     /**
      * Process offloaded attachments in paginated ACL update batches.
      */
+    function isAclSmartOriginalSkipEnabled() {
+        return $('#acl-smart-original-skip').is(':checked');
+    }
+
     function startAclBatchUpdate(retryFailed) {
         if (state.acl_running) {
             return;
@@ -1370,22 +1593,34 @@ jQuery(document).ready(function ($) {
 
         state.acl_running = true;
         $('#console-section').slideDown();
-        $('#btn-acl-make-public, #btn-acl-make-private, #btn-acl-retry-failed, #btn-acl-clear-failures').prop('disabled', true);
+        $('#btn-acl-make-public, #btn-acl-make-private, #btn-acl-retry-failed, #btn-acl-clear-failures, #btn-acl-reset-scan, #acl-smart-original-skip').prop('disabled', true);
 
-        var page = 1;
-        var perPage = 5;
+        var perPage = 25;
+        var lastId = 0;
         var processedAttachments = 0;
         var totalAttachments = 0;
         var totals = { updated: 0, skipped: 0, failed: 0 };
         var batchMode = state.acl_mode === 'private' ? 'private' : 'public';
+        var smartOriginalSkip = isAclSmartOriginalSkipEnabled() ? '1' : '0';
+        var scanProgress = state.acl_scan_progress || {};
+        var totalOffloaded = scanProgress.total_offloaded || 0;
         var startLabel = retryFailed
             ? '[START] Retrying failed ACL updates.'
             : (batchMode === 'private'
                 ? '[START] Updating ACLs for offloaded media to private.'
                 : '[START] Updating ACLs for offloaded media to public-read.');
 
+        if (!retryFailed && scanProgress.has_progress && scanProgress.remaining_count > 0) {
+            startLabel += ' Resuming: ' + Number(scanProgress.scanned_count || 0).toLocaleString() +
+                ' already scanned, ' + Number(scanProgress.remaining_count || 0).toLocaleString() + ' remaining.';
+        }
+
         logToConsole(startLabel, 'title');
-        updateProgressBar(0, 1);
+        if (!retryFailed && totalOffloaded > 0) {
+            updateProgressBar(scanProgress.scanned_count || 0, totalOffloaded);
+        } else {
+            updateProgressBar(0, 1);
+        }
         $('#progress-text').text(ACO_Media_Recovery_Settings.labels.acl_running);
 
         function processNextBatch() {
@@ -1395,10 +1630,11 @@ jQuery(document).ready(function ($) {
                 data: {
                     action: 'aco_media_recovery_acl_batch',
                     security: ACO_Media_Recovery_Settings.nonce,
-                    page: page,
                     per_page: perPage,
+                    last_id: lastId,
                     retry_failed: retryFailed ? '1' : '0',
-                    acl_mode: batchMode
+                    acl_mode: batchMode,
+                    smart_original_skip: smartOriginalSkip
                 },
                 success: function (res) {
                     if (!res || !res.success || !res.data) {
@@ -1414,9 +1650,19 @@ jQuery(document).ready(function ($) {
                     var data = res.data;
                     totalAttachments = data.total || totalAttachments;
                     processedAttachments += data.processed_ids || 0;
+                    if (typeof data.last_id !== 'undefined') {
+                        lastId = data.last_id;
+                    }
                     totals.updated += data.updated || 0;
                     totals.skipped += data.skipped || 0;
                     totals.failed += data.failed || 0;
+
+                    if (data.scan_progress) {
+                        renderAclScanProgress(data.scan_progress);
+                        if (!retryFailed) {
+                            totalOffloaded = data.scan_progress.total_offloaded || totalOffloaded;
+                        }
+                    }
 
                     if (data.logs && data.logs.length) {
                         data.logs.forEach(function (log) {
@@ -1425,13 +1671,25 @@ jQuery(document).ready(function ($) {
                         });
                     }
 
-                    updateProgressBar(processedAttachments, Math.max(totalAttachments, 1));
-                    $('#progress-text').text(
-                        'Processed ' + processedAttachments + ' of ' + totalAttachments +
-                        ' attachments · Updated: ' + totals.updated +
-                        ' · Skipped: ' + totals.skipped +
-                        ' · Failed: ' + totals.failed
-                    );
+                    if (retryFailed) {
+                        updateProgressBar(processedAttachments, Math.max(totalAttachments, 1));
+                        $('#progress-text').text(
+                            'Processed ' + processedAttachments + ' of ' + totalAttachments +
+                            ' attachments · Updated: ' + totals.updated +
+                            ' · Skipped: ' + totals.skipped +
+                            ' · Failed: ' + totals.failed
+                        );
+                    } else {
+                        var scannedNow = (data.scan_progress && data.scan_progress.scanned_count) || 0;
+                        var totalAll = (data.scan_progress && data.scan_progress.total_offloaded) || totalOffloaded || 1;
+                        updateProgressBar(scannedNow, totalAll);
+                        $('#progress-text').text(
+                            'Scanned ' + Number(scannedNow).toLocaleString() + ' of ' + Number(totalAll).toLocaleString() +
+                            ' attachments · Updated: ' + totals.updated +
+                            ' · Skipped: ' + totals.skipped +
+                            ' · Failed: ' + totals.failed
+                        );
+                    }
 
                     if (data.abort_batch) {
                         logToConsole('[STOPPED] ' + (data.logs && data.logs[0] ? data.logs[0].message : 'ACL updates are not supported by this storage provider.'), 'error');
@@ -1450,7 +1708,6 @@ jQuery(document).ready(function ($) {
                         return;
                     }
 
-                    page++;
                     processNextBatch();
                 },
                 error: function (xhr) {
@@ -1464,6 +1721,7 @@ jQuery(document).ready(function ($) {
         function finishAclBatch() {
             state.acl_running = false;
             state.acl_retry_mode = false;
+            $('#acl-smart-original-skip').prop('disabled', parseInt(ACO_Media_Recovery_Settings.acl_available, 10) !== 1);
             refreshAclStatus(false);
         }
 
